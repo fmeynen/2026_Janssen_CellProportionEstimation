@@ -102,6 +102,6 @@ bplapply(1:B,function(b){
     bind_rows() %>%
     mutate(sim.rep=b)
   
-  saveRDS(res.b, paste0("Results/simResults/fixedMarginError/sim.countData_itr_", b, ".rds"))
+  saveRDS(res.b, paste0("results/simResults/fixedMarginError/sim.countData_itr_", b, ".rds"))
 },BPPARAM = BiocParallel::MulticoreParam(workers = 14)) 
 
