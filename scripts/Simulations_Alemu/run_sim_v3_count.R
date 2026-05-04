@@ -12,10 +12,15 @@ N.set <- c(500, 1000, 5000, 10000, 25000, 50000, 100000, 1000000, 5000000) # the
 gma.set <- c(0.25, 1, 1.5) # level of biological variability
 
 R = 50 # number of replicates per sample
-B = 1 # number of repitition for sampling donors
+B = 1 # number of repetitions for sampling donors
 
 param.mat <- expand_grid(K=K.set, N=N.set, n=n.set, gma=gma.set) %>%
   subset(!(n==1 & gma!=1))
+
+#Outer loop
+#Inner loop: for each scenario (K,n,N,gamma)
+  #* Sample true cell-type proportions (Dirichlet)
+  #* Simulate sequencing counts
 
 # simulate counts
 bplapply(1:B,function(b){
@@ -104,4 +109,9 @@ bplapply(1:B,function(b){
   
   saveRDS(res.b, paste0("results/simResults/fixedMarginError/sim.countData_itr_", b, ".rds"))
 },BPPARAM = BiocParallel::MulticoreParam(workers = 14)) 
+
+
+sim.countData_itr_1 |> 
+  filter(donor_id == "donor_1" & sample_id == "sample_1") |>
+  slice_head(n = 5)
 

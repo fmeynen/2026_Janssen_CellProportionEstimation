@@ -18,6 +18,11 @@ param.mat <- expand_grid(K=K.set, N=N.set, n=n.set, gma=gma.set) %>%
   subset(!(n==1 & gma!=1))
 
 # simulate counts
+#Outer loop: for each repetition of sampling donors
+#Inner loop: for each scenario
+  #* Sample true cell-type proportions (Dirichlet)
+  #* Draw from multinomial distribution with true cell-type proportions
+
 bplapply(1:B,function(b){
   cat(b,"- ")
   set.seed(9551+b)

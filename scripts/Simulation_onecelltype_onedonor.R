@@ -31,9 +31,9 @@ library(tidyverse)  # For cleaner data manipulation and plotting
 ## Parameters -------------------------------------------------------------------------------------------------------
 params <- list(
   n_cell = c(10, 50, 100, 1000, 10000),  # number of cells
-  p = c(0.01, 0.05, 0.1, 0.3, 0.5),           # proportions
-  c = 1,                             # Scopit limit
-  B = 10000                           # repetitions
+  p      = c(0.01, 0.05, 0.1, 0.3, 0.5), # proportions
+  c      = 1,                            # Scopit limit
+  B      = 10000                         # repetitions
 )
 
 param_grid <- expand.grid(
@@ -46,13 +46,14 @@ param_grid <- expand.grid(
 
 ## Helper functions ------------------------------------------------------------------------------------------------
 ### Simulation Functions ----
-run_single_simulation <- function(n_cell, p, c, B, seed) {
+run_single_simulation <- function(n_cell, p,  B, c, seed) {
   set.seed(seed)
   #Simulation
   counts <- rbinom(B, n_cell, p)
   p_hat <- counts / n_cell
   #Output
   list(
+    counts = counts,
     scopit = mean(counts >= c),
     ARE = abs(p_hat - p) / p,
     ALOR = abs(log(p_hat / p)),
@@ -61,8 +62,9 @@ run_single_simulation <- function(n_cell, p, c, B, seed) {
   )
 }
 
+
 run_all_simulations <- function(param_grid) {
-  results <- pmap(param_grid, function(n_cell, p, c, B) {
+  results <- pmap(param_grid, function(n_cell, p,c, B) {
     seed <- 2609 * which(
       param_grid$n_cell == n_cell & param_grid$p == p &
         param_grid$c == c & param_grid$B == B
@@ -229,6 +231,7 @@ plot_alor <- function(results, param_df, ncol = NULL) {
       panel.grid.minor = element_blank()
     )
 }
+
 # Simulation ------------------------------------------------------------------------------------------------------
 
 res_sim <- run_all_simulations(param_grid)
@@ -237,11 +240,17 @@ res_sim <- run_all_simulations(param_grid)
 
 param_grid  |>
   mutate(
-    scopit      = map_dbl(res_sim, "scopit"),
-    mean_ARE    = map_dbl(res_sim, ~ mean(.x$ARE)),
-    mean_ATE    = map_dbl(res_sim, ~ mean(.x$ATE)),
-    mean_ALOR   = map_dbl(res_sim, ~ mean(.x$ALOR)),
-    CV          = map_dbl(res_sim, "CV")
+    scopit       = map_dbl(res_sim, "scopit"),
+    mean_ARE     = map_dbl(res_sim, ~ mean(.x$ARE)),
+    quant90_ARE  = map_dbl(res_sim, ~quantile(.x$ARE, probs = c(0.9))),
+    quant95_ARE  = map_dbl(res_sim, ~quantile(.x$ARE, probs = c(0.95))),
+    mean_ATE     = map_dbl(res_sim, ~ mean(.x$ATE)),
+    quant90_ATE  = map_dbl(res_sim, ~quantile(.x$ATE, probs = c(0.9))),
+    quant95_ATE  = map_dbl(res_sim, ~quantile(.x$ATE, probs = c(0.95))),
+    mean_ALOR    = map_dbl(res_sim, ~ mean(.x$ALOR)),
+    quant90_ALOR = map_dbl(res_sim, ~quantile(.x$ALOR, probs = c(0.9))),
+    quant95_ALOR = map_dbl(res_sim, ~quantile(.x$ALOR, probs = c(0.95))),
+    CV           = map_dbl(res_sim, "CV")
   ) -> sum_stats
 
 # Visualization ---------------------------------------------------------------------------------------------------
@@ -255,3 +264,14 @@ plot_are(res_sim, param_grid[param_grid$n_cell == 1000, ])
 plot_alor(res_sim, param_grid[param_grid$n_cell == 1000, ])
 plot_ate(res_sim, param_grid[param_grid$n_cell == 1000, ])
 sum_stats[sum_stats$n_cel == 1000, ]
+
+
+# Scratchpad ------------------------------------------------------------------------------------------------------
+
+p <- seq(1e-5,1-1e-5,1e-4)
+a <- asin(sqrt(p))
+l <- log(p/(1-p))
+
+plot(p,a)
+plot(p,l)
+
