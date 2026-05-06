@@ -57,7 +57,7 @@ validate_proportions <- function(p, tol = 1e-12) {
 generate_proportions_beta <- function(alpha, K = 10, grid = seq(0.1, 0.9, length.out = K)) {
   stopifnot(is.numeric(alpha), length(alpha) == 1L, alpha > 0)
   stopifnot(length(grid) == K)
-  w <- dbeta(grid, shape1 = 1, shape2 = alpha)
+  w <- dbeta(grid, shape1 = alpha, shape2 = 1)
   p <- normalize_to_simplex(w)
   validate_proportions(p)
   p
@@ -331,7 +331,7 @@ plot_success_rate_curve <- function(curves, metric, target = 0.95) {
       x     = paste0("Threshold (", metric, ")"),
       y     = "Success rate",
       title = paste0("Success-rate curve: ", metric)
-    )
+    ) + ggplot2::theme_bw()
 }
 
 #' Plot a histogram of which cell-type proportion drives the maximum error.
@@ -362,7 +362,7 @@ plot_argmax_histogram <- function(argmax, p, metric) {
 
 #' Run the full simulation experiment end-to-end.
 #'
-#' @param alpha      shape2 parameter of Beta(1, alpha) for proportion generation.
+#' @param alpha      shape1 parameter of Beta(alpha, 1) for proportion generation.
 #' @param K          Number of cell types (default 10).
 #' @param n          Total sample size per replicate.
 #' @param B          Number of replicates.
