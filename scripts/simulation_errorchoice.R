@@ -23,7 +23,7 @@ rm(list = ls())
 source(file.path("scripts", "simulation_functions.R"))
 
 # ---- Parameters ------------------------------------------------------------
-alpha     <- 3                           # Beta(1, alpha)
+alpha     <- 2                           # Beta(1, alpha)
 K         <- 10L                         # number of cell types
 n         <- 1000L                       # reads / total count per sample
 B         <- 5000L                       # simulation replicates
@@ -47,7 +47,8 @@ result <- run_simulation_experiment(
 
 # ---- Output ----------------------------------------------------------------
 cat("True proportions (p):\n")
-print(round(result$p, 4))
+print(round(result$p, 6))
+generate_proportions_curve(alpha = alpha)
 
 cat("\nSuccess-rate curves (first 10 rows):\n")
 print(head(result$curves, 10))
