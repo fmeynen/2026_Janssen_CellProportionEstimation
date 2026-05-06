@@ -8,7 +8,7 @@
 #   4. Extract max error with configurable tie handling
 #   5. Run B replicates efficiently (simulate once, evaluate thresholds post-hoc)
 #   6. Evaluate success-rate curves over a threshold grid
-#   7. Summarise which cell type most often drives the max error
+#   7. Summarize which cell type most often drives the max error
 #   8. Orchestrate the whole experiment in one call
 #
 # Future extensions (dirichlet-multinomial, logistic-normal) only need:
@@ -33,7 +33,7 @@ normalize_to_simplex <- function(w) {
 validate_proportions <- function(p, tol = 1e-12) {
   stopifnot(
     is.numeric(p),
-    all(is.finite(p) | is.nan(p) | p == 0),  # allow 0 (last grid point)
+    all(is.finite(p)),
     all(p >= 0),
     abs(sum(p) - 1) < tol
   )
@@ -145,7 +145,7 @@ compute_errors <- function(phat, p, metrics = c("AE", "ARE")) {
     result[["AE"]] <- abs(phat - p)
   }
   if ("ARE" %in% metrics) {
-    result[["ARE"]] <- abs(phat - p) / p   # intentionally explodes when p is small
+    result[["ARE"]] <- abs(phat - p) / p   # undefined (NaN/Inf) when p == 0; no stabilisation by design
   }
   result
 }
@@ -206,7 +206,7 @@ run_replicates <- function(p, n, B,
                            tie_method = "random",
                            seed = NULL, ...) {
   if (!is.null(seed)) set.seed(seed)
-  K <- length(p)                              # nolint: object_name_linter
+  K <- length(p)
   stopifnot(K >= 1L, B >= 1L)
 
   max_errors <- matrix(NA_real_,    nrow = B, ncol = length(metrics),
@@ -269,7 +269,7 @@ evaluate_thresholds <- function(max_errors, taus) {
 #' @return Tidy data.frame with columns: metric, index, count, fraction, p_value.
 summarize_argmax <- function(argmax, p) {
   stopifnot(is.matrix(argmax), !is.null(colnames(argmax)))
-  K <- length(p)                              # nolint: object_name_linter
+  K <- length(p)
   metrics <- colnames(argmax)
   rows <- vector("list", length(metrics))
   for (i in seq_along(metrics)) {
