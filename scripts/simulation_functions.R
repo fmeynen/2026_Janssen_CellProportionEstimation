@@ -361,11 +361,11 @@ plot_success_rate_curve <- function(curves, metric, target = 0.95) {
 #'
 #' @return A ggplot object.
 plot_argmax_histogram <- function(argmax, p, metric) {
-  prop_values <- p[argmax[, metric]]
-  df <- data.frame(proportion = prop_values)
-  ggplot2::ggplot(df, ggplot2::aes(x = proportion)) +
-    ggplot2::geom_histogram(bins = length(p), colour = "white") +
-    ggplot2::scale_x_continuous(breaks = round(p, 4)) +
+  idx_values <- argmax[, metric]
+  df <- data.frame(index = factor(idx_values, levels = seq_along(p)))
+  ggplot2::ggplot(df, ggplot2::aes(x = index)) +
+    ggplot2::geom_bar() +
+    ggplot2::scale_x_discrete(labels = round(p, 4)) +
     ggplot2::labs(
       x     = "True proportion",
       y     = "Count",
