@@ -27,10 +27,7 @@ alpha     <- 3                           # Beta(1, alpha)
 K         <- 10L                         # number of cell types
 n         <- 1000L                       # reads / total count per sample
 B         <- 5000L                       # simulation replicates
-# Separate threshold grids for each error metric.
-# AE  is bounded in [0, 1]; a range of 0 to 0.5 is sufficient.
-# ARE can exceed 1; a range of 0 to 2 covers most practical cases.
-taus_AE   <- 10^seq(0, log10(1.5), by = 0.0005) - 1  # threshold grid for AE  (0 to 0.5)
+taus_AE   <- exp(seq(0, log(1.1), by = 0.0005)) - 1  # threshold grid for AE  (0 to 0.1)
 taus_ARE  <- 10^seq(0, log10(3),   by = 0.0005) - 1  # threshold grid for ARE (0 to 2)
 taus      <- list(AE = taus_AE, ARE = taus_ARE)
 seed      <- 260926L
@@ -58,5 +55,7 @@ print(head(result$curves, 10))
 cat("\nArgmax summary (first 20 rows):\n")
 print(head(result$argmax_summary, 20))
 
-ggplot(data = result$curves, aes(x = tau, y = success_rate, color = metric)) + geom_point()
+ggplot(data = result$curves[result$curves$metric == "AE",], aes(x = tau, y = success_rate, color = metric)) + geom_point()
+ggplot(data = result$curves[result$curves$metric == "ARE",], aes(x = tau, y = success_rate, color = metric)) + geom_point()
 ggplot(data = result$argmax, aes(x = AE)) + geom_histogram()
+ggplot(data = result$argmax, aes(x = ARE)) + geom_histogram()
