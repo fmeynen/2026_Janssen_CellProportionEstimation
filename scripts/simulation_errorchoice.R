@@ -18,16 +18,17 @@
 #   * Additional error metrics
 #   * Distribution of max errors (not just success rates)
 # ---------------------------------------------------------------------------
+rm(list = ls())
 
 source(file.path("scripts", "simulation_functions.R"))
 
 # ---- Parameters ------------------------------------------------------------
-alpha     <- 2                          # Beta(1, 2): moderately skewed proportions
-K         <- 10L                        # number of cell types
-n         <- 1000L                      # reads / total count per sample
-B         <- 500L                       # simulation replicates
-taus      <- seq(0, 0.2, by = 0.005)   # threshold grid for success-rate curves
-seed      <- 42L
+alpha     <- 3                           # Beta(1, 3): moderately skewed proportions
+K         <- 10L                         # number of cell types
+n         <- 1000L                       # reads / total count per sample
+B         <- 5000L                       # simulation replicates
+taus      <- 10^seq(0, log10(3), by = 0.0005)-1  # threshold grid for success-rate curves
+seed      <- 260926L
 
 # ---- Run experiment --------------------------------------------------------
 result <- run_simulation_experiment(
@@ -47,7 +48,7 @@ cat("True proportions (p):\n")
 print(round(result$p, 4))
 
 cat("\nSuccess-rate curves (first 10 rows):\n")
-print(head(result$curves, 10))
+print(head(result$curves, 20))
 
-cat("\nArgmax summary (first 10 rows):\n")
-print(head(result$argmax_summary, 10))
+cat("\nArgmax summary (first 20 rows):\n")
+print(head(result$argmax_summary, 20))
