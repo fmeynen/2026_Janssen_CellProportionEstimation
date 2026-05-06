@@ -311,7 +311,54 @@ summarize_argmax <- function(argmax, p) {
 }
 
 
-# ---- H) High-level orchestration -------------------------------------------
+# ---- H) Visualisation helpers ----------------------------------------------
+
+#' Plot a success-rate curve for one error metric.
+#'
+#' @param curves  Tidy data.frame with columns: metric, tau, success_rate
+#'                (output of `evaluate_thresholds()`).
+#' @param metric  Character scalar; which metric to plot ("AE" or "ARE").
+#' @param target  Success-rate reference line drawn as a horizontal dotted line
+#'                (default 0.95).
+#'
+#' @return A ggplot object.
+plot_success_rate_curve <- function(curves, metric, target = 0.95) {
+  df <- curves[curves$metric == metric, ]
+  ggplot2::ggplot(df, ggplot2::aes(x = tau, y = success_rate)) +
+    ggplot2::geom_line() +
+    ggplot2::geom_hline(yintercept = target, linetype = "dotted") +
+    ggplot2::labs(
+      x     = paste0("Threshold (", metric, ")"),
+      y     = "Success rate",
+      title = paste0("Success-rate curve: ", metric)
+    )
+}
+
+#' Plot a histogram of which cell-type proportion drives the maximum error.
+#'
+#' Maps argmax indices to the true proportions so that the x-axis shows
+#' actual proportion values rather than integer indices.
+#'
+#' @param argmax  B x M integer matrix of argmax indices (from `run_replicates()`).
+#' @param p       True proportion vector (length K).
+#' @param metric  Character scalar; which metric to plot ("AE" or "ARE").
+#'
+#' @return A ggplot object.
+plot_argmax_histogram <- function(argmax, p, metric) {
+  prop_values <- p[argmax[, metric]]
+  df <- data.frame(proportion = prop_values)
+  ggplot2::ggplot(df, ggplot2::aes(x = proportion)) +
+    ggplot2::geom_histogram(bins = length(p), colour = "white") +
+    ggplot2::scale_x_continuous(breaks = round(p, 4)) +
+    ggplot2::labs(
+      x     = "True proportion",
+      y     = "Count",
+      title = paste0("Argmax distribution: ", metric)
+    )
+}
+
+
+# ---- I) High-level orchestration -------------------------------------------
 
 #' Run the full simulation experiment end-to-end.
 #'
