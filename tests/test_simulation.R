@@ -164,6 +164,37 @@ expected_cols <- c("metric", "tau", "success_rate")
 if (!all(expected_cols %in% names(curves))) stop("curves missing expected columns")
 pass("curves has correct columns")
 
+# named-list taus: AE and ARE use different threshold grids
+curves_list <- evaluate_thresholds(
+  me,
+  taus = list(AE = c(0.10, 0.20), ARE = c(0.15, 0.25))
+)
+
+ae_list_10 <- curves_list$success_rate[curves_list$metric == "AE" & curves_list$tau == 0.10]
+ae_list_20 <- curves_list$success_rate[curves_list$metric == "AE" & curves_list$tau == 0.20]
+if (!isTRUE(all.equal(ae_list_10, 1/3))) stop("named-list: AE success_rate at tau=0.10 wrong")
+if (!isTRUE(all.equal(ae_list_20, 2/3))) stop("named-list: AE success_rate at tau=0.20 wrong")
+pass("named-list taus: AE success rates correct")
+
+are_list_15 <- curves_list$success_rate[curves_list$metric == "ARE" & curves_list$tau == 0.15]
+are_list_25 <- curves_list$success_rate[curves_list$metric == "ARE" & curves_list$tau == 0.25]
+if (!isTRUE(all.equal(are_list_15, 1/3))) stop("named-list: ARE success_rate at tau=0.15 wrong")
+if (!isTRUE(all.equal(are_list_25, 2/3))) stop("named-list: ARE success_rate at tau=0.25 wrong")
+pass("named-list taus: ARE success rates correct")
+
+# named-list with unequal grid lengths produces correct row counts
+# 2 thresholds for AE + 2 thresholds for ARE = 4 rows total
+if (nrow(curves_list) != 4L) stop("named-list curves: wrong row count")
+pass("named-list taus: row count correct with different grid lengths")
+
+# missing metric in named-list should error
+err_missing <- tryCatch(
+  evaluate_thresholds(me, taus = list(AE = c(0.10))),
+  error = function(e) e$message
+)
+if (!grepl("ARE", err_missing)) stop("missing metric in taus list should error with metric name")
+pass("named-list taus: missing metric produces informative error")
+
 # ---- 7. run_simulation_experiment (smoke test) ------------------------------
 cat("\n7. run_simulation_experiment smoke test\n")
 
@@ -187,6 +218,19 @@ pass("max_errors dimensions correct")
 
 if (nrow(res$curves) != 3L * 2L) stop("curves has wrong row count")
 pass("curves row count correct")
+
+# smoke test with named-list taus (different grid lengths per metric)
+set.seed(7L)
+res_list <- run_simulation_experiment(
+  alpha = 2, K = 10L, n = 100L, B = 50L,
+  taus  = list(AE = c(0.05, 0.10), ARE = c(0.05, 0.10, 0.20)),
+  metrics = c("AE", "ARE"),
+  seed = 7L
+)
+
+if (nrow(res_list$curves[res_list$curves$metric == "AE",  ]) != 2L) stop("named-list: AE curve row count wrong")
+if (nrow(res_list$curves[res_list$curves$metric == "ARE", ]) != 3L) stop("named-list: ARE curve row count wrong")
+pass("run_simulation_experiment: named-list taus produces correct per-metric row counts")
 
 # ---- Done ------------------------------------------------------------------
 cat("\nAll tests passed.\n")

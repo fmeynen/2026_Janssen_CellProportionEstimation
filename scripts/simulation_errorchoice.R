@@ -27,7 +27,12 @@ alpha     <- 3                           # Beta(1, 3): moderately skewed proport
 K         <- 10L                         # number of cell types
 n         <- 1000L                       # reads / total count per sample
 B         <- 5000L                       # simulation replicates
-taus      <- 10^seq(0, log10(3), by = 0.0005)-1  # threshold grid for success-rate curves
+# Separate threshold grids for each error metric.
+# AE  is bounded in [0, 1]; a range of 0 to 0.5 is sufficient.
+# ARE can exceed 1; a range of 0 to 2 covers most practical cases.
+taus_AE   <- 10^seq(0, log10(1.5), by = 0.0005) - 1  # threshold grid for AE  (0 to 0.5)
+taus_ARE  <- 10^seq(0, log10(3),   by = 0.0005) - 1  # threshold grid for ARE (0 to 2)
+taus      <- list(AE = taus_AE, ARE = taus_ARE)
 seed      <- 260926L
 
 # ---- Run experiment --------------------------------------------------------

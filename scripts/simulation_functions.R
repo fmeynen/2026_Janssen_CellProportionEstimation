@@ -243,17 +243,39 @@ run_replicates <- function(p, n, B,
 #' Runs post-hoc on stored max errors; no re-simulation needed.
 #'
 #' @param max_errors B x M matrix of max error values (from `run_replicates()`).
-#' @param taus       Numeric vector of threshold values.
+#' @param taus       Either a numeric vector of threshold values applied to
+#'   every metric, or a named list with one numeric vector per metric
+#'   (e.g. `list(AE = c(...), ARE = c(...))`).  When a list is supplied every
+#'   metric present in `max_errors` must have an entry.
 #'
 #' @return Tidy data.frame with columns: metric, tau, success_rate.
 evaluate_thresholds <- function(max_errors, taus) {
   stopifnot(is.matrix(max_errors), !is.null(colnames(max_errors)))
   metrics <- colnames(max_errors)
+
+  # Normalise taus: plain vector -> same grid for all metrics;
+  # named list     -> per-metric grids.
+  if (is.numeric(taus)) {
+    taus_list <- setNames(rep(list(taus), length(metrics)), metrics)
+  } else if (is.list(taus)) {
+    missing_metrics <- setdiff(metrics, names(taus))
+    if (length(missing_metrics) > 0L) {
+      stop(sprintf(
+        "`taus` list is missing entries for metric(s): %s",
+        paste(missing_metrics, collapse = ", ")
+      ))
+    }
+    taus_list <- taus[metrics]
+  } else {
+    stop("`taus` must be a numeric vector or a named list of numeric vectors.")
+  }
+
   rows <- vector("list", length(metrics))
   for (i in seq_along(metrics)) {
-    m <- metrics[[i]]
-    rates <- vapply(taus, function(tau) mean(max_errors[, m] <= tau, na.rm = TRUE), numeric(1L))
-    rows[[i]] <- data.frame(metric = m, tau = taus, success_rate = rates,
+    m     <- metrics[[i]]
+    tau_m <- taus_list[[m]]
+    rates <- vapply(tau_m, function(tau) mean(max_errors[, m] <= tau, na.rm = TRUE), numeric(1L))
+    rows[[i]] <- data.frame(metric = m, tau = tau_m, success_rate = rates,
                             stringsAsFactors = FALSE)
   }
   do.call(rbind, rows)
@@ -297,7 +319,9 @@ summarize_argmax <- function(argmax, p) {
 #' @param K          Number of cell types (default 10).
 #' @param n          Total sample size per replicate.
 #' @param B          Number of replicates.
-#' @param taus       Numeric vector of thresholds for success-rate curves.
+#' @param taus       Numeric vector of thresholds (same for all metrics) or a
+#'   named list with one numeric vector per metric
+#'   (e.g. `list(AE = c(...), ARE = c(...))`).
 #' @param metrics    Error metrics; subset of c("AE", "ARE").
 #' @param model      Sampling model (currently only "multinomial").
 #' @param tie_method Tie-breaking rule for max-error argmax.
