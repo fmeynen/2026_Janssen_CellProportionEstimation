@@ -1,36 +1,53 @@
-#######################
-# Idea: Simulate proportions of 10 cell types and identify their errors. See how often they exceed a certain treshold
+# simulation_errorchoice.R
+#
+# MVP demonstration: multinomial sampling error for K cell-type proportions.
+#
+# Research question: how often does the *maximum* absolute (or relative) error
+# across all K cell types exceed a threshold tau?
+#
+# Workflow
+#   1. Generate true proportions from a monotone Beta curve (deterministic).
+#   2. Simulate B multinomial draws; extract max AE and max ARE per replicate.
+#   3. Sweep tau grid to obtain success-rate curves.
+#   4. Summarise which cell type most often drives the max error.
+#
+# Possible future changes:
+#   * Allow overdispersion  -> model = "dirichlet_multinomial"
+#   * Allow correlations    -> model = "logistic_normal_multinomial"
+#   * Other monotone curves (exponential, power, ...)
+#   * Additional error metrics
+#   * Distribution of max errors (not just success rates)
+# ---------------------------------------------------------------------------
 
-# Step 1: choose the proportions
-  #* Consider a monotone decreasing curve (for example a Beta(alpha, 1))
-  #* Take 10 equidistant points on this curve, their values are unscaled proportions
-  #* Rescale the 10 proportions such that their sum is equal to 1.
-  #* The result is a vector of proportions
+source(file.path("scripts", "simulation_functions.R"))
 
-# Step 2: Simulate proportions
-  #* For the vector of proportions, take a sample from a multinomial distribution, giving us 10 counts that sum to n
-  #* Calculate the observed proportions by dividing the counts by n
-  #* Calculate the error metrics:
-    #* absolute error AE: abs(observed prop - actual prop)
-    #* absolute relative error ARE: abs(observed prop - actual prop) / p
-  #* This results in a vector of errors.
-  #* Note the largest of these errors and note whether it is above or below a certain treshold tau
-  #* This results in a binary value for each error metric
-  #* Output is the binary values as well as the proportion that resulted in the largest error.
+# ---- Parameters ------------------------------------------------------------
+alpha     <- 2                          # Beta(1, 2): moderately skewed proportions
+K         <- 10L                        # number of cell types
+n         <- 1000L                      # reads / total count per sample
+B         <- 500L                       # simulation replicates
+taus      <- seq(0, 0.2, by = 0.005)   # threshold grid for success-rate curves
+seed      <- 42L
 
-# Step 3: Repeat step 2
- #* Repeat step 2 B times for different values of tau
+# ---- Run experiment --------------------------------------------------------
+result <- run_simulation_experiment(
+  alpha      = alpha,
+  K          = K,
+  n          = n,
+  B          = B,
+  taus       = taus,
+  metrics    = c("AE", "ARE"),
+  model      = "multinomial",
+  tie_method = "random",
+  seed       = seed
+)
 
-# Step 4: Graph results
-  #* a line graph with on the x-axis the treshold tau and on y the success rate (how much simulations are below the treshold)
-  #* same as above, but with both the AE and the ARE
-  #* a histogram that shows which of the proportions resulted in the largest error
-  #* same as above, but with both the AE and the ARE
+# ---- Output ----------------------------------------------------------------
+cat("True proportions (p):\n")
+print(round(result$p, 4))
 
-#Possible future changes:
-  #* Allow for overdispersion in the multinomial distribution
-  #* Allow for positive correlations in the multinomial distribution
-  #* Consider other monotone decreasing or increasing curves to take proportions from
-  #* Consider other error metrics
-  #* Extract the largest error to graph the distribution of largest errors.
-###########
+cat("\nSuccess-rate curves (first 10 rows):\n")
+print(head(result$curves, 10))
+
+cat("\nArgmax summary (first 10 rows):\n")
+print(head(result$argmax_summary, 10))
