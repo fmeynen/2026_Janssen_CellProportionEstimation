@@ -183,7 +183,8 @@ if (!isTRUE(all.equal(are_list_25, 2/3))) stop("named-list: ARE success_rate at 
 pass("named-list taus: ARE success rates correct")
 
 # named-list with unequal grid lengths produces correct row counts
-if (nrow(curves_list) != 2L + 2L) stop("named-list curves: wrong row count")
+# 2 thresholds for AE + 2 thresholds for ARE = 4 rows total
+if (nrow(curves_list) != 4L) stop("named-list curves: wrong row count")
 pass("named-list taus: row count correct with different grid lengths")
 
 # missing metric in named-list should error
