@@ -318,9 +318,9 @@ run_simulation_experiment <- function(alpha, K = 10, n, B, taus,
                                       model = "multinomial",
                                       tie_method = "random",
                                       seed = NULL, ...) {
-  p        <- generate_proportions_beta(alpha = alpha, K = K)
-  rep_out  <- run_replicates(p, n, B, metrics = metrics, model = model,
-                             tie_method = tie_method, seed = seed, ...)
+  p               <- generate_proportions_beta(alpha = alpha, K = K)
+  rep_out         <- run_replicates(p, n, B, metrics = metrics, model = model,
+                                    tie_method = tie_method, seed = seed, ...)
   curves          <- evaluate_thresholds(rep_out$max_errors, taus)
   argmax_summary  <- summarize_argmax(rep_out$argmax, p)
 
