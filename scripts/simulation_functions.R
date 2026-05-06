@@ -145,7 +145,7 @@ compute_errors <- function(phat, p, metrics = c("AE", "ARE")) {
     result[["AE"]] <- abs(phat - p)
   }
   if ("ARE" %in% metrics) {
-    result[["ARE"]] <- abs(phat - p) / p   # undefined (NaN/Inf) when p == 0; no stabilisation by design
+    result[["ARE"]] <- abs(phat - p) / p   # NaN when p == 0 and phat == 0; Inf when p == 0 and phat != 0; no stabilisation by design
   }
   result
 }
