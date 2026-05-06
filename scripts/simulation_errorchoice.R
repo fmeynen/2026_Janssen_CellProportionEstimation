@@ -23,7 +23,7 @@ rm(list = ls())
 source(file.path("scripts", "simulation_functions.R"))
 
 # ---- Parameters ------------------------------------------------------------
-alpha     <- 3                           # Beta(1, 3): moderately skewed proportions
+alpha     <- 3                           # Beta(1, alpha)
 K         <- 10L                         # number of cell types
 n         <- 1000L                       # reads / total count per sample
 B         <- 5000L                       # simulation replicates
@@ -48,7 +48,10 @@ cat("True proportions (p):\n")
 print(round(result$p, 4))
 
 cat("\nSuccess-rate curves (first 10 rows):\n")
-print(head(result$curves, 20))
+print(head(result$curves, 10))
 
 cat("\nArgmax summary (first 20 rows):\n")
 print(head(result$argmax_summary, 20))
+
+ggplot(data = result$curves, aes(x = tau, y = success_rate, color = metric)) + geom_point()
+ggplot(data = result$argmax, aes(x = AE)) + geom_histogram()
