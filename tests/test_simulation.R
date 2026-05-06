@@ -25,9 +25,9 @@ pass("sum(p) == 1")
 if (length(p) != 10L) stop("length(p) != 10")
 pass("length(p) == K")
 
-# nonnegative
-if (any(p < 0)) stop("p contains negative values")
-pass("all(p >= 0)")
+# all(p > 0) — strictly positive
+if (any(p <= 0)) stop("p contains zero or negative values")
+pass("all(p > 0)")
 
 # deterministic given alpha
 p2 <- generate_proportions_beta(alpha = 2, K = 10)
@@ -97,18 +97,13 @@ pass("AE correct")
 if (!isTRUE(all.equal(err$ARE, expected_are))) stop("ARE mismatch")
 pass("ARE correct")
 
-# ARE with p == 0 and phat == 0 should produce NaN
-p_zero <- c(0.5, 0.5, 0.0)
-phat_zero <- c(0.5, 0.5, 0.0)
-err_zero <- compute_errors(phat_zero, p_zero, metrics = "ARE")
-if (!is.nan(err_zero$ARE[3L])) stop("ARE with p==0 and phat==0 should be NaN")
-pass("ARE with p==0 produces NaN (not error)")
-
-# ARE with p == 0 and phat != 0 should produce Inf
-phat_inf <- c(0.4, 0.5, 0.1)   # phat[3] > 0 but p[3] == 0
-err_inf <- compute_errors(phat_inf, p_zero, metrics = "ARE")
-if (!is.infinite(err_inf$ARE[3L])) stop("ARE with p==0 and phat>0 should be Inf")
-pass("ARE with p==0 and phat>0 produces Inf")
+# validate_proportions rejects zero proportions
+err_zero_prop <- tryCatch(
+  validate_proportions(c(0.5, 0.5, 0.0)),
+  error = function(e) e$message
+)
+if (!is.character(err_zero_prop)) stop("validate_proportions should reject zero proportions")
+pass("validate_proportions rejects zero proportions")
 
 # ---- 5. max_error_summary ---------------------------------------------------
 cat("\n5. max_error_summary\n")

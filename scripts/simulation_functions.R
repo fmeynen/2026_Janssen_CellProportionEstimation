@@ -29,12 +29,12 @@ normalize_to_simplex <- function(w) {
 
 #' Validate that `p` is a proper proportion vector.
 #'
-#' Checks: numeric, finite, nonnegative, sums to 1 within `tol`.
+#' Checks: numeric, strictly positive, finite, sums to 1 within `tol`.
 validate_proportions <- function(p, tol = 1e-12) {
   stopifnot(
     is.numeric(p),
     all(is.finite(p)),
-    all(p >= 0),
+    all(p > 0),
     abs(sum(p) - 1) < tol
   )
   invisible(p)
@@ -44,16 +44,17 @@ validate_proportions <- function(p, tol = 1e-12) {
 #'
 #' @param alpha  shape2 parameter of Beta(1, alpha); controls curve steepness.
 #' @param K      number of cell types (default 10).
-#' @param grid   evaluation points in [0,1] (default K equidistant points).
+#' @param grid   evaluation points in (0,1) (default K equidistant points from
+#'               0.1 to 0.9, avoiding boundary values where dbeta returns 0).
 #'
-#' @return Numeric vector of length K summing to 1.
+#' @return Numeric vector of length K, all strictly positive, summing to 1.
 #'
 #' @details
 #' Unscaled weights: w = dbeta(grid, shape1 = 1, shape2 = alpha).
-#' With the default grid the last point is 1, where dbeta(1,1,alpha) = 0,
-#' so p[K] = 0.  ARE will therefore produce NaN for cell type K, which is
-#' intentional (see `compute_errors()`).
-generate_proportions_beta <- function(alpha, K = 10, grid = seq(0, 1, length.out = K)) {
+#' The default grid avoids 0 and 1 so that all weights — and therefore all
+#' proportions — are strictly positive.  This prevents ARE from producing
+#' NaN or Inf values for any cell type under the default parameters.
+generate_proportions_beta <- function(alpha, K = 10, grid = seq(0.1, 0.9, length.out = K)) {
   stopifnot(is.numeric(alpha), length(alpha) == 1L, alpha > 0)
   stopifnot(length(grid) == K)
   w <- dbeta(grid, shape1 = 1, shape2 = alpha)
