@@ -54,13 +54,29 @@ validate_proportions <- function(p, tol = 1e-12) {
 #' The default grid avoids 0 and 1 so that all weights — and therefore all
 #' proportions — are strictly positive.  This prevents ARE from producing
 #' NaN or Inf values for any cell type under the default parameters.
-generate_proportions_beta <- function(alpha, K = 10, grid = seq(0.1, 0.9, length.out = K)) {
+generate_proportions_beta <- function(alpha, K = 10, grid = seq(0.05, 0.95, length.out = K)) {
   stopifnot(is.numeric(alpha), length(alpha) == 1L, alpha > 0)
   stopifnot(length(grid) == K)
   w <- dbeta(grid, shape1 = alpha, shape2 = 1)
   p <- normalize_to_simplex(w)
   validate_proportions(p)
   p
+}
+
+generate_proportions_curve <- function(alpha, K = 10, grid = seq(0.05, 0.95, length.out = K)) {
+  w <- dbeta(grid, shape1 = alpha, shape2 = 1)
+  p <- normalize_to_simplex(w)
+  s <- seq(0, 1, length.out = 1000)
+  f <- dbeta(s, shape1 = alpha, shape2 = 1) / sum(w)
+  ggplot2::ggplot(mapping = ggplot2::aes(x = s, y = f)) +
+    ggplot2::geom_line() +
+    ggplot2::geom_point(ggplot2::aes(x = grid, y = p, color = "red")) +
+    ggplot2::theme_bw() +
+    ggplot2::labs(
+      x     = "x",
+      y     = "p",
+      title = paste0("Proportions taken with alpha = ", alpha)
+    )
 }
 
 
