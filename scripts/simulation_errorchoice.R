@@ -50,7 +50,7 @@ saveRDS(result, file = "results/simresults/simulation_errorchoice.RData")
 # ---- Output ----------------------------------------------------------------
 cat("True proportions (p):\n")
 print(round(result$p_table, 6))
-lapply(alpha, generate_proportions_curve)
+generate_proportions_curve(alpha)
 
 cat("\nSuccess-rate curves (first 10 rows):\n")
 print(head(result$curves, 10))
