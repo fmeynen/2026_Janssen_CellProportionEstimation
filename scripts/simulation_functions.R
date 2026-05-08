@@ -69,7 +69,8 @@ generate_proportions_beta <- function(alpha, K = 10, grid = seq(0.05, 0.95, leng
 #' @param K Number of cell types (default 10).
 #' @param grid Evaluation points in (0,1), length K.
 #'
-#' @return A ggplot object with one facet per alpha value.
+#' @return A ggplot object with one facet per alpha value, using `facet_grid`
+#'   and `scales = "free_y"` so each alpha panel can use its own y-axis range.
 generate_proportions_curve <- function(alpha, K = 10, grid = seq(0.05, 0.95, length.out = K)) {
   stopifnot(is.numeric(alpha), length(alpha) >= 1L, all(alpha > 0))
   stopifnot(length(grid) == K)
@@ -101,7 +102,7 @@ generate_proportions_curve <- function(alpha, K = 10, grid = seq(0.05, 0.95, len
 
   curve_df <- do.call(rbind, curve_rows)
   point_df <- do.call(rbind, point_rows)
-  alpha_levels <- unique(alpha)
+  alpha_levels <- alpha[!duplicated(alpha)]
   curve_df$alpha <- factor(curve_df$alpha, levels = alpha_levels)
   point_df$alpha <- factor(point_df$alpha, levels = alpha_levels)
 
