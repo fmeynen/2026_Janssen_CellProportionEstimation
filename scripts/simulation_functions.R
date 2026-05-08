@@ -115,7 +115,7 @@ generate_proportions_curve <- function(alpha, K = 10, grid = seq(0.05, 0.95, len
       size = 1.8,
       color = "#D62728"
     ) +
-    ggplot2::facet_grid(rows = ggplot2::vars(alpha), scales = "free_y") +
+    ggplot2::facet_grid(cols = ggplot2::vars(alpha), scales = "fixed") +
     ggplot2::theme_bw() +
     ggplot2::theme(legend.position = "none") +
     ggplot2::labs(
