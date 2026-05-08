@@ -63,19 +63,65 @@ generate_proportions_beta <- function(alpha, K = 10, grid = seq(0.05, 0.95, leng
   p
 }
 
+#' Plot normalized Beta(alpha, 1) proportion curves.
+#'
+#' @param alpha Numeric vector of one or more positive alpha values.
+#' @param K Number of cell types (default 10).
+#' @param grid Evaluation points in (0,1), length K.
+#'
+#' @return A ggplot object with one facet per alpha value, using `facet_grid`
+#'   and `scales = "free_y"` so each alpha panel can use its own y-axis range.
 generate_proportions_curve <- function(alpha, K = 10, grid = seq(0.05, 0.95, length.out = K)) {
-  w <- dbeta(grid, shape1 = alpha, shape2 = 1)
-  p <- normalize_to_simplex(w)
+  stopifnot(is.numeric(alpha), length(alpha) >= 1L, all(alpha > 0))
+  stopifnot(length(grid) == K)
+
   s <- seq(0, 1, length.out = 1000)
-  f <- dbeta(s, shape1 = alpha, shape2 = 1) / sum(w)
-  ggplot2::ggplot(mapping = ggplot2::aes(x = s, y = f)) +
-    ggplot2::geom_line() +
-    ggplot2::geom_point(ggplot2::aes(x = grid, y = p, color = "red")) +
+
+  curve_rows <- vector("list", length(alpha))
+  point_rows <- vector("list", length(alpha))
+
+  for (i in seq_along(alpha)) {
+    alpha_i <- alpha[[i]]
+    w <- dbeta(grid, shape1 = alpha_i, shape2 = 1)
+    p <- normalize_to_simplex(w)
+
+    curve_rows[[i]] <- data.frame(
+      alpha = alpha_i,
+      s = s,
+      f = dbeta(s, shape1 = alpha_i, shape2 = 1) / sum(w),
+      stringsAsFactors = FALSE
+    )
+
+    point_rows[[i]] <- data.frame(
+      alpha = alpha_i,
+      grid = grid,
+      p = p,
+      stringsAsFactors = FALSE
+    )
+  }
+
+  curve_df <- do.call(rbind, curve_rows)
+  point_df <- do.call(rbind, point_rows)
+  alpha_levels <- alpha[!duplicated(alpha)]
+  curve_df$alpha <- factor(curve_df$alpha, levels = alpha_levels)
+  point_df$alpha <- factor(point_df$alpha, levels = alpha_levels)
+
+  ggplot2::ggplot(curve_df, ggplot2::aes(x = s, y = f)) +
+    ggplot2::geom_line(linewidth = 0.7, color = "#2C3E50") +
+    ggplot2::geom_point(
+      data = point_df,
+      ggplot2::aes(x = grid, y = p),
+      inherit.aes = FALSE,
+      size = 1.8,
+      color = "#D62728"
+    ) +
+    ggplot2::facet_grid(cols = ggplot2::vars(alpha), scales = "fixed") +
     ggplot2::theme_bw() +
+    ggplot2::theme(legend.position = "none") +
     ggplot2::labs(
-      x     = "x",
-      y     = "p",
-      title = paste0("Proportions taken with alpha = ", alpha)
+      x = "x",
+      y = "p",
+      title = "Proportions taken with Beta(alpha, 1)"
     )
 }
 
@@ -434,7 +480,8 @@ plot_argmax_histogram <- function(argmax, p, metric) {
 #' @return List with elements:
 #'   \describe{
 #'     \item{inputs}{All input arguments.}
-#'     \item{p_table}{Tidy data.frame: alpha, index, p_value.}
+#'     \item{p_table}{Data.frame with one row per alpha and one column per index
+#'       (`index_1`, ..., `index_K`) containing the corresponding p values.}
 #'     \item{replicate_summaries}{Tidy data.frame:
 #'       alpha, replicate, metric, max_error, argmax_index.}
 #'     \item{errors_long}{Tidy data.frame:
@@ -468,9 +515,9 @@ run_simulation_experiment <- function(alpha, K = 10, n, B, taus,
 
     p_table_list[[i]] <- data.frame(
       alpha = alpha_i,
-      index = seq_len(K),
-      p_value = p,
-      stringsAsFactors = FALSE
+      as.list(stats::setNames(as.numeric(p), paste0("index_", seq_len(K)))),
+      stringsAsFactors = FALSE,
+      check.names = FALSE
     )
 
     replicate_summaries_list[[i]] <- data.frame(
