@@ -373,7 +373,7 @@ plot_success_rate_curve <- function(result, metric = NULL, alphas = NULL, target
   if (!is.null(alphas)) {
     df <- df[df$alpha %in% alphas, , drop = FALSE]
   }
-  ggplot2::ggplot(df, ggplot2::aes(x = tau, y = success_rate, color = factor(alpha))) +
+  p <- ggplot2::ggplot(df, ggplot2::aes(x = tau, y = success_rate, color = factor(alpha))) +
     ggplot2::geom_line() +
     ggplot2::geom_hline(yintercept = target, linetype = "dotted") +
     ggplot2::labs(
@@ -382,10 +382,11 @@ plot_success_rate_curve <- function(result, metric = NULL, alphas = NULL, target
       color = "alpha",
       title = "Success-rate curve(s)"
     ) +
-    ggplot2::theme_bw() +
-    if (is.null(metric) || length(unique(df$metric)) > 1L) {
-      ggplot2::facet_wrap(~metric, scales = "free_x")
-    }
+    ggplot2::theme_bw()
+  if (is.null(metric) || length(unique(df$metric)) > 1L) {
+    p <- p + ggplot2::facet_wrap(~metric, scales = "free_x")
+  }
+  p
 }
 
 #' Plot a histogram of which cell-type proportion drives the maximum error.
