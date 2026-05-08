@@ -23,7 +23,7 @@ rm(list = ls())
 source(file.path("scripts", "simulation_functions.R"))
 
 # ---- Parameters ------------------------------------------------------------
-alpha     <- 2                           # Beta(1, alpha)
+alpha     <- c(1, 2, 5)                  # Beta(alpha, 1)
 K         <- 10L                         # number of cell types
 n         <- 1000L                       # reads / total count per sample
 B         <- 5000L                       # simulation replicates
@@ -47,8 +47,8 @@ result <- run_simulation_experiment(
 
 # ---- Output ----------------------------------------------------------------
 cat("True proportions (p):\n")
-print(round(result$p, 6))
-generate_proportions_curve(alpha = alpha)
+print(round(result$p_table, 6))
+lapply(alpha, generate_proportions_curve)
 
 cat("\nSuccess-rate curves (first 10 rows):\n")
 print(head(result$curves, 10))
@@ -56,7 +56,7 @@ print(head(result$curves, 10))
 cat("\nArgmax summary (first 20 rows):\n")
 print(head(result$argmax_summary, 20))
 
-plot_success_rate_curve(result$curves, metric = "AE")
-plot_success_rate_curve(result$curves, metric = "ARE")
-plot_argmax_histogram(result$argmax, result$p, metric = "AE")
-plot_argmax_histogram(result$argmax, result$p, metric = "ARE")
+plot_success_rate_curve(result, metric = "AE")
+plot_success_rate_curve(result, metric = "ARE")
+plot_success_rate_curve(result, metric = NULL)
+plot_success_rate_curve(result, metric = "AE", alphas = c(1, 5))

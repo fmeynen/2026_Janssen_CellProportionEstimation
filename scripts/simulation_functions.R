@@ -40,9 +40,9 @@ validate_proportions <- function(p, tol = 1e-12) {
   invisible(p)
 }
 
-#' Generate K true proportions from dbeta(grid, 1, alpha), always rescaled.
+#' Generate K true proportions from dbeta(grid, alpha, 1), always rescaled.
 #'
-#' @param alpha  shape2 parameter of Beta(1, alpha); controls curve steepness.
+#' @param alpha  shape1 parameter of Beta(alpha, 1); controls curve steepness.
 #' @param K      number of cell types (default 10).
 #' @param grid   evaluation points in (0,1) (default K equidistant points from
 #'               0.1 to 0.9, avoiding boundary values where dbeta returns 0).
@@ -50,7 +50,7 @@ validate_proportions <- function(p, tol = 1e-12) {
 #' @return Numeric vector of length K, all strictly positive, summing to 1.
 #'
 #' @details
-#' Unscaled weights: w = dbeta(grid, shape1 = 1, shape2 = alpha).
+#' Unscaled weights: w = dbeta(grid, shape1 = alpha, shape2 = 1).
 #' The default grid avoids 0 and 1 so that all weights — and therefore all
 #' proportions — are strictly positive.  This prevents ARE from producing
 #' NaN or Inf values for any cell type under the default parameters.
@@ -215,6 +215,7 @@ max_error_summary <- function(error_vec, tie_method = c("random", "first", "last
 #'   \describe{
 #'     \item{max_errors}{B x M numeric matrix of max error values.}
 #'     \item{argmax}{B x M integer matrix of argmax indices.}
+#'     \item{errors}{B x K x M numeric array of per-cell-type errors.}
 #'     \item{inputs}{Copy of all input arguments (including seed used).}
 #'   }
 run_replicates <- function(p, n, B,
@@ -230,6 +231,8 @@ run_replicates <- function(p, n, B,
                        dimnames = list(NULL, metrics))
   argmax     <- matrix(NA_integer_, nrow = B, ncol = length(metrics),
                        dimnames = list(NULL, metrics))
+  errors     <- array(NA_real_, dim = c(B, K, length(metrics)),
+                      dimnames = list(NULL, seq_len(K), metrics))
 
   for (b in seq_len(B)) {
     y_b      <- simulate_counts(p, n, model = model, ...)
@@ -240,12 +243,14 @@ run_replicates <- function(p, n, B,
       s <- max_error_summary(errors_b[[m]], tie_method = tie_method)
       max_errors[b, m] <- s$max_error_value
       argmax[b, m]     <- s$argmax_index
+      errors[b, , m]   <- errors_b[[m]]
     }
   }
 
   list(
     max_errors = max_errors,
     argmax     = argmax,
+    errors     = errors,
     inputs     = list(p = p, n = n, B = B, metrics = metrics,
                       model = model, tie_method = tie_method, seed = seed)
   )
@@ -264,10 +269,19 @@ run_replicates <- function(p, n, B,
 #'   (e.g. `list(AE = c(...), ARE = c(...))`).  When a list is supplied every
 #'   metric present in `max_errors` must have an entry.
 #'
-#' @return Tidy data.frame with columns: metric, tau, success_rate.
-evaluate_thresholds <- function(max_errors, taus) {
+#' @param errors     Optional B x K x M array of per-cell-type errors
+#'   (from `run_replicates()`), used to compute `mean_n_above`.
+#'
+#' @return Tidy data.frame with columns: metric, tau, success_rate, mean_n_above.
+evaluate_thresholds <- function(max_errors, taus, errors = NULL) {
   stopifnot(is.matrix(max_errors), !is.null(colnames(max_errors)))
   metrics <- colnames(max_errors)
+  has_error_array <- !is.null(errors)
+  if (has_error_array) {
+    stopifnot(length(dim(errors)) == 3L)
+    stopifnot(dim(errors)[1] == nrow(max_errors))
+    stopifnot(dim(errors)[3] == length(metrics))
+  }
 
   # Normalise taus: plain vector -> same grid for all metrics;
   # named list     -> per-metric grids.
@@ -291,7 +305,19 @@ evaluate_thresholds <- function(max_errors, taus) {
     m     <- metrics[[i]]
     tau_m <- taus_list[[m]]
     rates <- vapply(tau_m, function(tau) mean(max_errors[, m] <= tau, na.rm = TRUE), numeric(1L))
+    if (has_error_array) {
+      errors_m <- errors[, , m, drop = TRUE]
+      if (is.null(dim(errors_m))) errors_m <- matrix(errors_m, ncol = 1L)
+      mean_n_above <- vapply(
+        tau_m,
+        function(tau) mean(rowSums(errors_m > tau), na.rm = TRUE),
+        numeric(1L)
+      )
+    } else {
+      mean_n_above <- rep(NA_real_, length(tau_m))
+    }
     rows[[i]] <- data.frame(metric = m, tau = tau_m, success_rate = rates,
+                            mean_n_above = mean_n_above,
                             stringsAsFactors = FALSE)
   }
   do.call(rbind, rows)
@@ -329,25 +355,37 @@ summarize_argmax <- function(argmax, p) {
 
 # ---- H) Visualisation helpers ----------------------------------------------
 
-#' Plot a success-rate curve for one error metric.
+#' Plot success-rate curves from a simulation result object.
 #'
-#' @param curves  Tidy data.frame with columns: metric, tau, success_rate
-#'                (output of `evaluate_thresholds()`).
-#' @param metric  Character scalar; which metric to plot ("AE" or "ARE").
+#' @param result  Output list from `run_simulation_experiment()`.
+#' @param metric  Character scalar. If NULL, plot all metrics (faceted).
+#' @param alphas  Optional numeric vector; subset of alpha values to plot.
 #' @param target  Success-rate reference line drawn as a horizontal dotted line
 #'                (default 0.95).
 #'
 #' @return A ggplot object.
-plot_success_rate_curve <- function(curves, metric, target = 0.95) {
-  df <- curves[curves$metric == metric, ]
-  ggplot2::ggplot(df, ggplot2::aes(x = tau, y = success_rate)) +
+plot_success_rate_curve <- function(result, metric = NULL, alphas = NULL, target = 0.95) {
+  stopifnot(is.list(result), "curves" %in% names(result))
+  df <- result$curves
+  if (!is.null(metric)) {
+    df <- df[df$metric %in% metric, , drop = FALSE]
+  }
+  if (!is.null(alphas)) {
+    df <- df[df$alpha %in% alphas, , drop = FALSE]
+  }
+  ggplot2::ggplot(df, ggplot2::aes(x = tau, y = success_rate, color = factor(alpha))) +
     ggplot2::geom_line() +
     ggplot2::geom_hline(yintercept = target, linetype = "dotted") +
     ggplot2::labs(
-      x     = paste0("Threshold (", metric, ")"),
+      x     = "Threshold (tau)",
       y     = "Success rate",
-      title = paste0("Success-rate curve: ", metric)
-    ) + ggplot2::theme_bw()
+      color = "alpha",
+      title = "Success-rate curve(s)"
+    ) +
+    ggplot2::theme_bw() +
+    if (is.null(metric) || length(unique(df$metric)) > 1L) {
+      ggplot2::facet_wrap(~metric, scales = "free_x")
+    }
 }
 
 #' Plot a histogram of which cell-type proportion drives the maximum error.
@@ -378,7 +416,8 @@ plot_argmax_histogram <- function(argmax, p, metric) {
 
 #' Run the full simulation experiment end-to-end.
 #'
-#' @param alpha      shape1 parameter of Beta(alpha, 1) for proportion generation.
+#' @param alpha      Numeric vector; one or more shape1 values for
+#'   Beta(alpha, 1) proportion generation.
 #' @param K          Number of cell types (default 10).
 #' @param n          Total sample size per replicate.
 #' @param B          Number of replicates.
@@ -394,31 +433,87 @@ plot_argmax_histogram <- function(argmax, p, metric) {
 #' @return List with elements:
 #'   \describe{
 #'     \item{inputs}{All input arguments.}
-#'     \item{p}{True proportion vector (length K).}
-#'     \item{max_errors}{B x M matrix of max error values.}
-#'     \item{argmax}{B x M matrix of argmax indices.}
-#'     \item{curves}{Tidy data.frame: metric, tau, success_rate.}
-#'     \item{argmax_summary}{Tidy data.frame: metric, index, count, fraction, p_value.}
+#'     \item{p_table}{Tidy data.frame: alpha, index, p_value.}
+#'     \item{replicate_summaries}{Tidy data.frame:
+#'       alpha, replicate, metric, max_error, argmax_index.}
+#'     \item{errors_long}{Tidy data.frame:
+#'       alpha, replicate, metric, index, error.}
+#'     \item{curves}{Tidy data.frame:
+#'       alpha, metric, tau, success_rate, mean_n_above.}
+#'     \item{argmax_summary}{Tidy data.frame:
+#'       alpha, metric, index, count, fraction, p_value.}
 #'   }
 run_simulation_experiment <- function(alpha, K = 10, n, B, taus,
                                       metrics = c("AE", "ARE"),
                                       model = "multinomial",
                                       tie_method = "random",
                                       seed = NULL, ...) {
-  p               <- generate_proportions_beta(alpha = alpha, K = K)
-  rep_out         <- run_replicates(p, n, B, metrics = metrics, model = model,
-                                    tie_method = tie_method, seed = seed, ...)
-  curves          <- evaluate_thresholds(rep_out$max_errors, taus)
-  argmax_summary  <- summarize_argmax(rep_out$argmax, p)
+  stopifnot(is.numeric(alpha), length(alpha) >= 1L, all(alpha > 0))
+
+  p_table_list <- vector("list", length(alpha))
+  replicate_summaries_list <- vector("list", length(alpha))
+  errors_long_list <- vector("list", length(alpha))
+  curves_list <- vector("list", length(alpha))
+  argmax_summary_list <- vector("list", length(alpha))
+
+  for (i in seq_along(alpha)) {
+    alpha_i <- alpha[[i]]
+    seed_i <- if (is.null(seed)) NULL else seed + i - 1L
+    p <- generate_proportions_beta(alpha = alpha_i, K = K)
+    rep_out <- run_replicates(
+      p, n, B, metrics = metrics, model = model,
+      tie_method = tie_method, seed = seed_i, ...
+    )
+
+    p_table_list[[i]] <- data.frame(
+      alpha = alpha_i,
+      index = seq_len(K),
+      p_value = p,
+      stringsAsFactors = FALSE
+    )
+
+    replicate_summaries_list[[i]] <- data.frame(
+      alpha = alpha_i,
+      replicate = rep(seq_len(B), times = length(metrics)),
+      metric = rep(metrics, each = B),
+      max_error = as.vector(rep_out$max_errors[, metrics, drop = FALSE]),
+      argmax_index = as.vector(rep_out$argmax[, metrics, drop = FALSE]),
+      stringsAsFactors = FALSE
+    )
+
+    errors_m_list <- vector("list", length(metrics))
+    for (j in seq_along(metrics)) {
+      m <- metrics[[j]]
+      errors_m <- rep_out$errors[, , m, drop = TRUE]
+      if (is.null(dim(errors_m))) errors_m <- matrix(errors_m, ncol = 1L)
+      errors_m_list[[j]] <- data.frame(
+        alpha = alpha_i,
+        replicate = rep(seq_len(B), times = ncol(errors_m)),
+        metric = m,
+        index = rep(seq_len(ncol(errors_m)), each = B),
+        error = as.vector(errors_m),
+        stringsAsFactors = FALSE
+      )
+    }
+    errors_long_list[[i]] <- do.call(rbind, errors_m_list)
+
+    curves_i <- evaluate_thresholds(rep_out$max_errors, taus, errors = rep_out$errors)
+    curves_i$alpha <- alpha_i
+    curves_list[[i]] <- curves_i[, c("alpha", "metric", "tau", "success_rate", "mean_n_above")]
+
+    argmax_i <- summarize_argmax(rep_out$argmax, p)
+    argmax_i$alpha <- alpha_i
+    argmax_summary_list[[i]] <- argmax_i[, c("alpha", "metric", "index", "count", "fraction", "p_value")]
+  }
 
   list(
-    inputs         = list(alpha = alpha, K = K, n = n, B = B, taus = taus,
-                          metrics = metrics, model = model,
-                          tie_method = tie_method, seed = seed),
-    p              = p,
-    max_errors     = rep_out$max_errors,
-    argmax         = rep_out$argmax,
-    curves         = curves,
-    argmax_summary = argmax_summary
+    inputs = list(alpha = alpha, K = K, n = n, B = B, taus = taus,
+                  metrics = metrics, model = model,
+                  tie_method = tie_method, seed = seed),
+    p_table = do.call(rbind, p_table_list),
+    replicate_summaries = do.call(rbind, replicate_summaries_list),
+    errors_long = do.call(rbind, errors_long_list),
+    curves = do.call(rbind, curves_list),
+    argmax_summary = do.call(rbind, argmax_summary_list)
   )
 }
