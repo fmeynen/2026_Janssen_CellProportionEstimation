@@ -307,7 +307,7 @@ evaluate_thresholds <- function(max_errors, taus, errors = NULL) {
     rates <- vapply(tau_m, function(tau) mean(max_errors[, m] <= tau, na.rm = TRUE), numeric(1L))
     if (has_error_array) {
       errors_m <- errors[, , m, drop = TRUE]
-      if (is.null(dim(errors_m))) errors_m <- matrix(errors_m, ncol = 1L)
+      if (is.null(dim(errors_m))) errors_m <- matrix(errors_m, nrow = nrow(max_errors))
       mean_n_above <- vapply(
         tau_m,
         function(tau) mean(rowSums(errors_m > tau), na.rm = TRUE),
@@ -486,7 +486,7 @@ run_simulation_experiment <- function(alpha, K = 10, n, B, taus,
     for (j in seq_along(metrics)) {
       m <- metrics[[j]]
       errors_m <- rep_out$errors[, , m, drop = TRUE]
-      if (is.null(dim(errors_m))) errors_m <- matrix(errors_m, ncol = 1L)
+      if (is.null(dim(errors_m))) errors_m <- matrix(errors_m, nrow = B)
       errors_m_list[[j]] <- data.frame(
         alpha = alpha_i,
         replicate = rep(seq_len(B), times = ncol(errors_m)),
