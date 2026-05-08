@@ -23,12 +23,12 @@ rm(list = ls())
 source(file.path("scripts", "simulation_functions.R"))
 
 # ---- Parameters ------------------------------------------------------------
-alpha     <- c(1, 2, 5)                  # Beta(alpha, 1)
+alpha     <- c(2, 2.5, 3, 4, 5)                  # Beta(alpha, 1)
 K         <- 10L                         # number of cell types
 n         <- 1000L                       # reads / total count per sample
 B         <- 5000L                       # simulation replicates
-taus_AE   <- exp(seq(0, log(1.1), by = 0.0005)) - 1  # threshold grid for AE  (0 to 0.1)
-taus_ARE  <- 10^seq(0, log10(3),   by = 0.0005) - 1  # threshold grid for ARE (0 to 2)
+taus_AE   <- exp(seq(0, log(1+0.05), by = 0.0005)) - 1  # threshold grid for AE  (0 to 0.1)
+taus_ARE  <- 10^seq(0, log10(1+3),   by = 0.0005) - 1  # threshold grid for ARE (0 to 2)
 taus      <- list(AE = taus_AE, ARE = taus_ARE)
 seed      <- 260926L
 
@@ -45,6 +45,8 @@ result <- run_simulation_experiment(
   seed       = seed
 )
 
+saveRDS(result, file = "results/simresults/simulation_errorchoice.RData")
+
 # ---- Output ----------------------------------------------------------------
 cat("True proportions (p):\n")
 print(round(result$p_table, 6))
@@ -59,4 +61,4 @@ print(head(result$argmax_summary, 20))
 plot_success_rate_curve(result, metric = "AE")
 plot_success_rate_curve(result, metric = "ARE")
 plot_success_rate_curve(result, metric = NULL)
-plot_success_rate_curve(result, metric = "AE", alphas = c(1, 5))
+plot_success_rate_curve(result, metric = "AE", alphas = c(2, 5))
