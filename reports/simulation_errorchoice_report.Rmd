@@ -22,7 +22,8 @@ source(file.path("scripts", "simulation_errorchoice.R"))
 
 # Overview
 
-This report evaluates multinomial sampling error across cell-type proportions generated from the normalized Beta(\(\alpha, 1\)) construction.
+This report evaluates multinomial sampling error across cell-type proportions
+generated from the normalized Beta(\(\alpha, 1\)) construction.
 
 For each \(\alpha\), the workflow:
 
@@ -64,7 +65,11 @@ setup_table <- data.frame(
   stringsAsFactors = FALSE
 )
 
-knitr::kable(setup_table, col.names = c("Parameter", "Value"), caption = "Simulation configuration used in this report.")
+knitr::kable(
+  setup_table,
+  col.names = c("Parameter", "Value"),
+  caption = "Simulation configuration used in this report."
+)
 ```
 
 ```{r run-simulation}
@@ -75,7 +80,7 @@ result <- run_simulation_errorchoice(config)
 
 ## Proportion curves
 
-```{r proportion-curves, fig.cap="Normalized Beta(alpha,1) proportion curves and grid-point proportions for each alpha."}
+```{r proportion-curves, fig.cap="Normalized Beta(alpha,1) curves and grid-point proportions by alpha."}
 generate_proportions_curve(alpha = config$alpha, K = config$K)
 ```
 
@@ -112,7 +117,7 @@ plot_success_rate_curve(result, metric = "ARE")
 
 ## AE and ARE comparison
 
-```{r argmax-hist-both, fig.cap="Argmax histograms by alpha and metric, showing which cell-type index most often drives maximum error."}
+```{r argmax-hist-both, fig.cap="Argmax histograms by alpha and metric for maximum-error indices."}
 plot_argmax_histogram(result, metric = NULL)
 ```
 
