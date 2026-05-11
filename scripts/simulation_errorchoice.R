@@ -65,7 +65,7 @@ if (is_simulation_errorchoice_main()) {
 
   cat("True proportions (p):\n")
   print(round(result$p_table, 6))
-  generate_proportions_curve(result$inputs$alpha)
+  generate_proportions_curve(result$inputs$alpha, K = result$inputs$K)
 
   cat("\nSuccess-rate curves (first 10 rows):\n")
   print(head(result$curves, 10))
