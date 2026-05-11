@@ -3,10 +3,12 @@ title: "Simulation Error-Choice Report"
 date: "`r Sys.Date()`"
 output:
   pdf_document:
-    toc: true
+    toc: false
     number_sections: true
+    extra_dependencies: ["float"]
 params:
-  alpha: [2, 2.5, 3, 4, 5]
+  alpha: 
+    value: [2, 2.5, 3, 4, 5]
   K: 10
   n: 1000
   B: 5000
@@ -15,20 +17,21 @@ params:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, fig.width = 10, fig.height = 5)
+knitr::opts_chunk$set(fig.pos = "H")
 
-source(file.path("scripts", "simulation_functions.R"))
-source(file.path("scripts", "simulation_errorchoice.R"))
+knitr::opts_knit$set(root.dir = here::here())
+source(here::here("scripts", "simulation_functions.R"))
+source(here::here("scripts", "simulation_errorchoice.R"))
 ```
 
 # Overview
 
-This report evaluates multinomial sampling error across cell-type proportions
-generated from the normalized Beta(\(\alpha, 1\)) construction.
+This report evaluates multinomial sampling error across cell-type proportions generated from a weighted Beta(\(\alpha, 1\)) distribution.
 
 For each \(\alpha\), the workflow:
 
 1. Generates true proportions over \(K\) cell types.
-2. Simulates multinomial count draws.
+2. Simulates multinomial (no overdispersion) count draws of \(n\) cells, \(B\) times.
 3. Computes maximum error across cell types for Absolute Error (AE) and Absolute Relative Error (ARE).
 4. Summarizes threshold-based success rates and the cell-type index most frequently driving the maximum error.
 
@@ -68,76 +71,64 @@ setup_table <- data.frame(
 knitr::kable(
   setup_table,
   col.names = c("Parameter", "Value"),
-  caption = "Simulation configuration used in this report."
+  caption = "Simulation configuration used in this report.",
+  booktabs = TRUE
 )
 ```
 
 ```{r run-simulation}
 result <- run_simulation_errorchoice(config)
 ```
-
+\newpage
 # True proportions from Beta(\(\alpha, 1\))
 
-## Proportion curves
+The 10 cell types are given proportions equal to the 0.05, 0.15, 0.25, ...0.85, 0.95 quantiles from a Beta(\(\alpha, 1\)) distribution and then weighted such that \(\sum p_i = 1\).
 
-```{r proportion-curves, fig.cap="Normalized Beta(alpha,1) curves and grid-point proportions by alpha."}
+Larger values of \(\alpha\) tend to result in more small-proportion cell types.
+
+```{r proportion-curves, fig.cap="Weighted Beta(alpha,1) curves and grid-point proportions by alpha."}
 generate_proportions_curve(alpha = config$alpha, K = config$K)
 ```
 
-## Numeric proportions per alpha
-
 ```{r proportion-table}
-p_table <- result$p_table
+p_table <- round(result$p_table, digits = 4)
 value_cols <- grep("^index_", names(p_table), value = TRUE)
 p_table[value_cols] <- lapply(p_table[value_cols], function(x) signif(x, 6))
 knitr::kable(p_table, caption = "True proportion values by alpha and cell-type index.")
 ```
-
+\newpage
 # Success-rate curves
 
-## AE and ARE comparison
+The success-rate curves show the probability of success (i.e. P(max(error)< threshold)) for different thresholds.
 
 ```{r success-rate-curves-both, fig.cap="Success-rate curves by alpha, shown separately for AE and ARE."}
 plot_success_rate_curve(result, metric = NULL)
 ```
 
-## AE-only
+For the AE, success rate curves are very similar for different true proportions vectors, with a 95% success rate for thresholds between 0.3 and 0.35.
 
-```{r success-rate-curves-ae, fig.cap="AE success-rate curves across alpha values."}
-plot_success_rate_curve(result, metric = "AE")
-```
+For the ARE, success rate drops down for larger values of \(\alpha\). This is expected, as larger values of \(\alpha\) increases the number of low-proportion cell types. 
 
-## ARE-only
-
-```{r success-rate-curves-are, fig.cap="ARE success-rate curves across alpha values."}
-plot_success_rate_curve(result, metric = "ARE")
-```
+Note the jump in success rate for the ARE when threshold \(\tau = 1\). Since ARE = AE / \(p\), when ARE = 1, the AE is equal to the true proportion \(p\). This happens when the estimated proportion \(\hat{p}\) is equal to 0: i.e. the simulated cell count is 0.
 
 # Argmax histograms
-
-## AE and ARE comparison
+The argmax histograms show the index at which the error is largest (larger indices represent larger true probabilities). In case of a tie, one index is chosen at random.
 
 ```{r argmax-hist-both, fig.cap="Argmax histograms by alpha and metric for maximum-error indices."}
 plot_argmax_histogram(result, metric = NULL)
 ```
 
-## AE-only
+As expected, AE (top row) is largest for larger true proportions \(p\). However, smaller proportions can still contribute to the largest AE.
 
-```{r argmax-hist-ae, fig.cap="Argmax histogram for AE across alpha values."}
-plot_argmax_histogram(result, metric = "AE")
-```
+The ARE (bottom row) is driven mostly by the 2-3 cell types with the smallest proportion. Note for \(\alpha = 5\), the 2nd smallest proportion actually has the largest ARE, most of the time. The smallest proportion will often have a simulated cell count of 0, resulting in an ARE of exactly 1. The second smallest proportion then has a possibility to show a larger ARE.
 
-## ARE-only
+\newpage
 
-```{r argmax-hist-are, fig.cap="Argmax histogram for ARE across alpha values."}
-plot_argmax_histogram(result, metric = "ARE")
-```
-
-# Argmax summary tables
-
-```{r argmax-summary}
-argmax_summary <- result$argmax_summary
-argmax_summary$fraction <- signif(argmax_summary$fraction, 4)
-argmax_summary$p_value <- signif(argmax_summary$p_value, 6)
-knitr::kable(argmax_summary, caption = "Argmax summary per alpha and error metric.")
-```
+# Next steps
+* Repeat with overdispersion (dirichlet multinomial)
+* Find a cutoff for when to choose AE vs ARE
+  * Idea: for a given threshold for AE and ARE, which cutoff for \(\hat{p}\) maximizes the success-rate
+* Hierarchical distributions
+  * Idea: "parent" has a certain proportion,
+  * "Daughter" cell types have (uniform) distribution
+  * How does this affect the distribution of error metrics?

@@ -18,8 +18,7 @@
 #   * Additional error metrics
 #   * Distribution of max errors (not just success rates)
 # ---------------------------------------------------------------------------
-source(file.path("scripts", "simulation_functions.R"))
-
+source(here::here("scripts", "simulation_functions.R"))
 # ---- Parameters ------------------------------------------------------------
 simulation_errorchoice_defaults <- function() {
   taus_AE <- exp(seq(0, log(1 + 0.05), by = 0.0005)) - 1
