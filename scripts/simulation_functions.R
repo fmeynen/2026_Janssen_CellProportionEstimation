@@ -436,25 +436,45 @@ plot_success_rate_curve <- function(result, metric = NULL, alphas = NULL, target
 
 #' Plot a histogram of which cell-type proportion drives the maximum error.
 #'
-#' Maps argmax indices to the true proportions so that the x-axis shows
-#' actual proportion values rather than integer indices.
-#'
-#' @param argmax  B x M integer matrix of argmax indices (from `run_replicates()`).
-#' @param p       True proportion vector (length K).
-#' @param metric  Character scalar; which metric to plot ("AE" or "ARE").
+#' @param result  Output list from `run_simulation_experiment()`.
+#' @param metric  Character scalar. If NULL, plot all metrics (faceted by row).
+#' @param alphas  Optional numeric vector; subset of alpha values to plot.
 #'
 #' @return A ggplot object.
-plot_argmax_histogram <- function(argmax, p, metric) {
-  idx_values <- argmax[, metric]
-  df <- data.frame(index = factor(idx_values, levels = seq_along(p)))
-  ggplot2::ggplot(df, ggplot2::aes(x = index)) +
+plot_argmax_histogram <- function(result, metric = NULL, alphas = NULL) {
+  stopifnot(
+    "result must be a list" = is.list(result),
+    "result must contain replicate_summaries" = "replicate_summaries" %in% names(result)
+  )
+  df <- result$replicate_summaries
+  if (!is.null(metric)) {
+    if (!any(df$metric %in% metric)) {
+      stop("No rows match the requested metric value(s).", call. = FALSE)
+    }
+    df <- df[df$metric %in% metric, , drop = FALSE]
+  }
+  if (!is.null(alphas)) {
+    if (!any(df$alpha %in% alphas)) {
+      stop("No rows match the requested alpha value(s).", call. = FALSE)
+    }
+    df <- df[df$alpha %in% alphas, , drop = FALSE]
+  }
+
+  argmax_plot <- ggplot2::ggplot(df, ggplot2::aes(x = argmax_index)) +
     ggplot2::geom_bar() +
-    ggplot2::scale_x_discrete(labels = round(p, 4)) +
     ggplot2::labs(
-      x     = "True proportion",
+      x     = "Cell-type index (argmax)",
       y     = "Count",
-      title = paste0("Argmax distribution: ", metric)
-    )
+      title = "Distribution of maximum-error indices"
+    ) +
+    ggplot2::theme_bw()
+
+  if (length(unique(df$metric)) > 1L) {
+    argmax_plot <- argmax_plot + ggplot2::facet_grid(rows = ggplot2::vars(metric), cols = ggplot2::vars(alpha))
+  } else {
+    argmax_plot <- argmax_plot + ggplot2::facet_grid(cols = ggplot2::vars(alpha))
+  }
+  argmax_plot
 }
 
 
