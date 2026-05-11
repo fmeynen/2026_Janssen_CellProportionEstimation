@@ -443,7 +443,10 @@ plot_success_rate_curve <- function(result, metric = NULL, alphas = NULL, target
 #'
 #' @return A ggplot object.
 plot_argmax_histogram <- function(result, metric = NULL, alphas = NULL) {
-  stopifnot(is.list(result), "replicate_summaries" %in% names(result))
+  stopifnot(
+    "result must be a list" = is.list(result),
+    "result must contain replicate_summaries" = "replicate_summaries" %in% names(result)
+  )
   df <- result$replicate_summaries
   if (!is.null(metric)) {
     df <- df[df$metric %in% metric, , drop = FALSE]
@@ -452,7 +455,7 @@ plot_argmax_histogram <- function(result, metric = NULL, alphas = NULL) {
     df <- df[df$alpha %in% alphas, , drop = FALSE]
   }
 
-  p <- ggplot2::ggplot(df, ggplot2::aes(x = argmax_index)) +
+  argmax_plot <- ggplot2::ggplot(df, ggplot2::aes(x = argmax_index)) +
     ggplot2::geom_bar() +
     ggplot2::labs(
       x     = "Argmax index",
@@ -462,11 +465,11 @@ plot_argmax_histogram <- function(result, metric = NULL, alphas = NULL) {
     ggplot2::theme_bw()
 
   if (length(unique(df$metric)) > 1L) {
-    p <- p + ggplot2::facet_grid(rows = ggplot2::vars(metric), cols = ggplot2::vars(alpha))
+    argmax_plot <- argmax_plot + ggplot2::facet_grid(rows = ggplot2::vars(metric), cols = ggplot2::vars(alpha))
   } else {
-    p <- p + ggplot2::facet_grid(cols = ggplot2::vars(alpha))
+    argmax_plot <- argmax_plot + ggplot2::facet_grid(cols = ggplot2::vars(alpha))
   }
-  p
+  argmax_plot
 }
 
 
