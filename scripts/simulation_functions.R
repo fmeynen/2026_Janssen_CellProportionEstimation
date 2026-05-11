@@ -459,11 +459,12 @@ plot_argmax_histogram <- function(result, metric = NULL, alphas = NULL) {
       y     = "Count",
       title = "Argmax distribution(s)"
     ) +
-    ggplot2::theme_bw() +
-    ggplot2::facet_grid(cols = ggplot2::vars(alpha))
+    ggplot2::theme_bw()
 
-  if (is.null(metric) || length(unique(df$metric)) > 1L) {
+  if (length(unique(df$metric)) > 1L) {
     p <- p + ggplot2::facet_grid(rows = ggplot2::vars(metric), cols = ggplot2::vars(alpha))
+  } else {
+    p <- p + ggplot2::facet_grid(cols = ggplot2::vars(alpha))
   }
   p
 }
