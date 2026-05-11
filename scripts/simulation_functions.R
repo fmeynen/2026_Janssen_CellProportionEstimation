@@ -458,9 +458,9 @@ plot_argmax_histogram <- function(result, metric = NULL, alphas = NULL) {
   argmax_plot <- ggplot2::ggplot(df, ggplot2::aes(x = argmax_index)) +
     ggplot2::geom_bar() +
     ggplot2::labs(
-      x     = "Argmax index",
+      x     = "Cell-type index with maximum error",
       y     = "Count",
-      title = "Argmax distribution(s)"
+      title = "Distribution of maximum-error indices"
     ) +
     ggplot2::theme_bw()
 
