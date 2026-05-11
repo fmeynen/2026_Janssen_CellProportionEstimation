@@ -1,0 +1,138 @@
+---
+title: "Simulation Error-Choice Report"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    toc: true
+    number_sections: true
+params:
+  alpha: [2, 2.5, 3, 4, 5]
+  K: 10
+  n: 1000
+  B: 5000
+  seed: 260926
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, fig.width = 10, fig.height = 5)
+
+source(file.path("scripts", "simulation_functions.R"))
+source(file.path("scripts", "simulation_errorchoice.R"))
+```
+
+# Overview
+
+This report evaluates multinomial sampling error across cell-type proportions generated from the normalized Beta(\(\alpha, 1\)) construction.
+
+For each \(\alpha\), the workflow:
+
+1. Generates true proportions over \(K\) cell types.
+2. Simulates multinomial count draws.
+3. Computes maximum error across cell types for Absolute Error (AE) and Absolute Relative Error (ARE).
+4. Summarizes threshold-based success rates and the cell-type index most frequently driving the maximum error.
+
+# Simulation setup
+
+```{r configuration}
+base_config <- simulation_errorchoice_defaults()
+taus <- base_config$taus
+
+config <- list(
+  alpha = as.numeric(params$alpha),
+  K = as.integer(params$K),
+  n = as.integer(params$n),
+  B = as.integer(params$B),
+  taus = taus,
+  metrics = c("AE", "ARE"),
+  model = "multinomial",
+  tie_method = "random",
+  seed = as.integer(params$seed)
+)
+
+setup_table <- data.frame(
+  item = c("alpha", "K", "n", "B", "metrics", "model", "tie_method", "seed"),
+  value = c(
+    paste(config$alpha, collapse = ", "),
+    config$K,
+    config$n,
+    config$B,
+    paste(config$metrics, collapse = ", "),
+    config$model,
+    config$tie_method,
+    config$seed
+  ),
+  stringsAsFactors = FALSE
+)
+
+knitr::kable(setup_table, col.names = c("Parameter", "Value"), caption = "Simulation configuration used in this report.")
+```
+
+```{r run-simulation}
+result <- run_simulation_errorchoice(config)
+```
+
+# True proportions from Beta(\(\alpha, 1\))
+
+## Proportion curves
+
+```{r proportion-curves, fig.cap="Normalized Beta(alpha,1) proportion curves and grid-point proportions for each alpha."}
+generate_proportions_curve(alpha = config$alpha, K = config$K)
+```
+
+## Numeric proportions per alpha
+
+```{r proportion-table}
+p_table <- result$p_table
+value_cols <- grep("^index_", names(p_table), value = TRUE)
+p_table[value_cols] <- lapply(p_table[value_cols], function(x) signif(x, 6))
+knitr::kable(p_table, caption = "True proportion values by alpha and cell-type index.")
+```
+
+# Success-rate curves
+
+## AE and ARE comparison
+
+```{r success-rate-curves-both, fig.cap="Success-rate curves by alpha, shown separately for AE and ARE."}
+plot_success_rate_curve(result, metric = NULL)
+```
+
+## AE-only
+
+```{r success-rate-curves-ae, fig.cap="AE success-rate curves across alpha values."}
+plot_success_rate_curve(result, metric = "AE")
+```
+
+## ARE-only
+
+```{r success-rate-curves-are, fig.cap="ARE success-rate curves across alpha values."}
+plot_success_rate_curve(result, metric = "ARE")
+```
+
+# Argmax histograms
+
+## AE and ARE comparison
+
+```{r argmax-hist-both, fig.cap="Argmax histograms by alpha and metric, showing which cell-type index most often drives maximum error."}
+plot_argmax_histogram(result, metric = NULL)
+```
+
+## AE-only
+
+```{r argmax-hist-ae, fig.cap="Argmax histogram for AE across alpha values."}
+plot_argmax_histogram(result, metric = "AE")
+```
+
+## ARE-only
+
+```{r argmax-hist-are, fig.cap="Argmax histogram for ARE across alpha values."}
+plot_argmax_histogram(result, metric = "ARE")
+```
+
+# Argmax summary tables
+
+```{r argmax-summary}
+argmax_summary <- result$argmax_summary
+argmax_summary$fraction <- signif(argmax_summary$fraction, 4)
+argmax_summary$p_value <- signif(argmax_summary$p_value, 6)
+knitr::kable(argmax_summary, caption = "Argmax summary per alpha and error metric.")
+```
