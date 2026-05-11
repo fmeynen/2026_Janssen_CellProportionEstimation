@@ -449,16 +449,22 @@ plot_argmax_histogram <- function(result, metric = NULL, alphas = NULL) {
   )
   df <- result$replicate_summaries
   if (!is.null(metric)) {
+    if (!any(df$metric %in% metric)) {
+      stop("No rows match the requested metric value(s).", call. = FALSE)
+    }
     df <- df[df$metric %in% metric, , drop = FALSE]
   }
   if (!is.null(alphas)) {
+    if (!any(df$alpha %in% alphas)) {
+      stop("No rows match the requested alpha value(s).", call. = FALSE)
+    }
     df <- df[df$alpha %in% alphas, , drop = FALSE]
   }
 
   argmax_plot <- ggplot2::ggplot(df, ggplot2::aes(x = argmax_index)) +
     ggplot2::geom_bar() +
     ggplot2::labs(
-      x     = "Cell-type index with maximum error",
+      x     = "Cell-type index (argmax)",
       y     = "Count",
       title = "Distribution of maximum-error indices"
     ) +
