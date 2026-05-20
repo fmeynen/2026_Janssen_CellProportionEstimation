@@ -87,7 +87,7 @@ The 10 cell types are given proportions equal to the 0.05, 0.15, 0.25, ...0.85, 
 Larger values of \(\alpha\) tend to result in more small-proportion cell types.
 
 ```{r proportion-curves, fig.cap="Weighted Beta(alpha,1) curves and grid-point proportions by alpha."}
-plot_proportions_curve(alpha = config$alpha, K = config$K)
+plot_proportions_curve(result)
 ```
 
 ```{r proportion-table}

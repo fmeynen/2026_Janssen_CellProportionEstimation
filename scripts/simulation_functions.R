@@ -476,65 +476,117 @@ summarize_argmax <- function(argmax, p) {
 
 # ---- H) Visualisation helpers ----------------------------------------------
 
-#' Plot normalized Beta(alpha, 1) proportion curves.
+#' Plot true-proportion points with their underlying Beta-shaped curves.
 #'
-#' @param alpha Numeric vector of one or more positive alpha values.
-#' @param K Number of cell types (default 10).
-#' @param grid Evaluation points in (0,1), length K.
+#' @param result Output list from `run_simulation_experiment()`.
 #'
-#' @return A ggplot object with one facet per alpha value, using `facet_grid`.
-plot_proportions_curve <- function(alpha, K = 10, grid = seq(0.05, 0.95, length.out = K)) {
-  stopifnot(is.numeric(alpha), length(alpha) >= 1L, all(alpha > 0))
-  stopifnot(length(grid) == K)
-  
-  s <- seq(0, 1, length.out = 1000)
-  
-  curve_rows <- vector("list", length(alpha))
-  point_rows <- vector("list", length(alpha))
-  
-  for (i in seq_along(alpha)) {
-    alpha_i <- alpha[[i]]
-    w <- dbeta(grid, shape1 = alpha_i, shape2 = 1)
-    p <- normalize_to_simplex(w)
-    
+#' @return A ggplot object. For Beta proportions, facets are by alpha. For
+#'   fixed-max Beta proportions, facets are by p_max (rows) and alpha (columns).
+plot_proportions_curve <- function(result) {
+  stopifnot(
+    "result must be a list" = is.list(result),
+    "result must contain inputs" = "inputs" %in% names(result),
+    "result must contain p_table" = "p_table" %in% names(result)
+  )
+  if (!("proportion_method" %in% names(result$inputs))) {
+    stop("result$inputs must contain proportion_method.", call. = FALSE)
+  }
+
+  p_table <- result$p_table
+  if (!is.data.frame(p_table) || nrow(p_table) == 0L) {
+    stop("result$p_table must be a non-empty data.frame.", call. = FALSE)
+  }
+  index_cols <- grep("^index_", names(p_table), value = TRUE)
+  if (length(index_cols) == 0L) {
+    stop("result$p_table must contain index_1 ... index_K columns.", call. = FALSE)
+  }
+  if (!("alpha" %in% names(p_table))) {
+    stop("result$p_table must contain an alpha column.", call. = FALSE)
+  }
+
+  method <- result$inputs$proportion_method
+  if (!method %in% c("beta", "fixed_max_beta")) {
+    stop("Unsupported proportion_method in result$inputs.", call. = FALSE)
+  }
+
+  K <- length(index_cols)
+  n_rows <- nrow(p_table)
+  curve_rows <- vector("list", n_rows)
+  point_rows <- vector("list", n_rows)
+
+  for (i in seq_len(n_rows)) {
+    alpha_i <- as.numeric(p_table$alpha[[i]])
+    p_i <- as.numeric(p_table[i, index_cols, drop = FALSE])
+    p_max_i <- if ("p_max" %in% names(p_table)) as.numeric(p_table$p_max[[i]]) else NA_real_
+
+    if (identical(method, "beta")) {
+      grid_i <- default_beta_grid(K)
+      w <- dbeta(grid_i, shape1 = alpha_i, shape2 = 1)
+      s <- seq(0, 1, length.out = 1000)
+      f <- dbeta(s, shape1 = alpha_i, shape2 = 1) / sum(w)
+      x_points <- grid_i
+    } else {
+      if (!is.finite(p_max_i)) {
+        stop("result$p_table must contain finite p_max values for fixed_max_beta.", call. = FALSE)
+      }
+      grid_i <- default_beta_grid(K - 1L)
+      w <- dbeta(grid_i, shape1 = alpha_i, shape2 = 1)
+      fixed_curve_upper <- 0.95
+      s <- seq(0, fixed_curve_upper, length.out = 1000)
+      f <- (1 - p_max_i) * dbeta(s, shape1 = alpha_i, shape2 = 1) / sum(w)
+      x_points <- c(grid_i, 1)
+    }
+
     curve_rows[[i]] <- data.frame(
       alpha = alpha_i,
+      p_max = p_max_i,
       s = s,
-      f = dbeta(s, shape1 = alpha_i, shape2 = 1) / sum(w),
+      f = f,
       stringsAsFactors = FALSE
     )
-    
     point_rows[[i]] <- data.frame(
       alpha = alpha_i,
-      grid = grid,
-      p = p,
+      p_max = p_max_i,
+      x = x_points,
+      p = p_i,
       stringsAsFactors = FALSE
     )
   }
-  
+
   curve_df <- do.call(rbind, curve_rows)
   point_df <- do.call(rbind, point_rows)
-  alpha_levels <- alpha[!duplicated(alpha)]
+  alpha_levels <- unique(p_table$alpha)
   curve_df$alpha <- factor(curve_df$alpha, levels = alpha_levels)
   point_df$alpha <- factor(point_df$alpha, levels = alpha_levels)
-  
-  ggplot2::ggplot(curve_df, ggplot2::aes(x = s, y = f)) +
+  if ("p_max" %in% names(p_table)) {
+    p_max_levels <- unique(p_table$p_max[is.finite(p_table$p_max)])
+    curve_df$p_max <- factor(curve_df$p_max, levels = p_max_levels)
+    point_df$p_max <- factor(point_df$p_max, levels = p_max_levels)
+  }
+
+  proportions_plot <- ggplot2::ggplot(curve_df, ggplot2::aes(x = s, y = f)) +
     ggplot2::geom_line(linewidth = 0.7, color = "#2C3E50") +
     ggplot2::geom_point(
       data = point_df,
-      ggplot2::aes(x = grid, y = p),
+      ggplot2::aes(x = x, y = p),
       inherit.aes = FALSE,
       size = 1.8,
       color = "#D62728"
     ) +
-    ggplot2::facet_grid(cols = ggplot2::vars(alpha), scales = "fixed") +
     ggplot2::theme_bw() +
     ggplot2::theme(legend.position = "none") +
     ggplot2::labs(
       x = "x",
       y = "p",
-      title = "Proportions taken with Beta(alpha, 1)"
+      title = "True proportions and Beta-shaped curves"
     )
+
+  if (identical(method, "fixed_max_beta")) {
+    proportions_plot <- proportions_plot + ggplot2::facet_grid(rows = ggplot2::vars(p_max), cols = ggplot2::vars(alpha))
+  } else {
+    proportions_plot <- proportions_plot + ggplot2::facet_grid(cols = ggplot2::vars(alpha))
+  }
+  proportions_plot
 }
 
 
