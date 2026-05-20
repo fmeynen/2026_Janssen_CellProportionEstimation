@@ -521,11 +521,13 @@ plot_proportions_curve <- function(alpha, K = 10, grid = seq(0.05, 0.95, length.
 #' @param result  Output list from `run_simulation_experiment()`.
 #' @param metric  Character scalar. If NULL, plot all metrics (faceted).
 #' @param alphas  Optional numeric vector; subset of alpha values to plot.
+#' @param p_maxs  Optional numeric vector; subset of p_max values to plot.
 #' @param target  Success-rate reference line drawn as a horizontal dotted line
 #'                (default 0.95).
 #'
 #' @return A ggplot object.
-plot_success_rate_curve <- function(result, metric = NULL, alphas = NULL, target = 0.95) {
+plot_success_rate_curve <- function(result, metric = NULL, alphas = NULL,
+                                    p_maxs = NULL, target = 0.95) {
   stopifnot(is.list(result), "curves" %in% names(result))
   df <- result$curves
   if (!is.null(metric)) {
@@ -534,7 +536,26 @@ plot_success_rate_curve <- function(result, metric = NULL, alphas = NULL, target
   if (!is.null(alphas)) {
     df <- df[df$alpha %in% alphas, , drop = FALSE]
   }
-  p <- ggplot2::ggplot(df, ggplot2::aes(x = tau, y = success_rate, color = factor(alpha))) +
+  if (!is.null(p_maxs)) {
+    if (!("p_max" %in% names(df))) {
+      stop("No p_max metadata found in result$curves.", call. = FALSE)
+    }
+    df <- df[df$p_max %in% p_maxs, , drop = FALSE]
+  }
+  if (nrow(df) == 0L) {
+    stop("No rows match the requested metric/alpha/p_max filter(s).", call. = FALSE)
+  }
+
+  has_p_max <- "p_max" %in% names(df) && any(!is.na(df$p_max))
+  aes_mapping <- ggplot2::aes(x = tau, y = success_rate, color = factor(alpha))
+  if (has_p_max) {
+    aes_mapping <- ggplot2::aes(
+      x = tau, y = success_rate, color = factor(alpha),
+      linetype = factor(p_max), group = interaction(alpha, p_max)
+    )
+  }
+
+  p <- ggplot2::ggplot(df, aes_mapping) +
     ggplot2::geom_line() +
     ggplot2::geom_hline(yintercept = target, linetype = "dotted") +
     ggplot2::labs(
@@ -544,6 +565,9 @@ plot_success_rate_curve <- function(result, metric = NULL, alphas = NULL, target
       title = "Success-rate curve(s)"
     ) +
     ggplot2::theme_bw()
+  if (has_p_max) {
+    p <- p + ggplot2::labs(linetype = "p_max")
+  }
   if (is.null(metric) || length(unique(df$metric)) > 1L) {
     p <- p + ggplot2::facet_wrap(~metric, scales = "free_x")
   }
@@ -555,9 +579,10 @@ plot_success_rate_curve <- function(result, metric = NULL, alphas = NULL, target
 #' @param result  Output list from `run_simulation_experiment()`.
 #' @param metric  Character scalar. If NULL, plot all metrics (faceted by row).
 #' @param alphas  Optional numeric vector; subset of alpha values to plot.
+#' @param p_maxs  Optional numeric vector; subset of p_max values to plot.
 #'
 #' @return A ggplot object.
-plot_argmax_histogram <- function(result, metric = NULL, alphas = NULL) {
+plot_argmax_histogram <- function(result, metric = NULL, alphas = NULL, p_maxs = NULL) {
   stopifnot(
     "result must be a list" = is.list(result),
     "result must contain replicate_summaries" = "replicate_summaries" %in% names(result)
@@ -575,6 +600,16 @@ plot_argmax_histogram <- function(result, metric = NULL, alphas = NULL) {
     }
     df <- df[df$alpha %in% alphas, , drop = FALSE]
   }
+  if (!is.null(p_maxs)) {
+    if (!("p_max" %in% names(df))) {
+      stop("No p_max metadata found in result$replicate_summaries.", call. = FALSE)
+    }
+    if (!any(df$p_max %in% p_maxs)) {
+      stop("No rows match the requested p_max value(s).", call. = FALSE)
+    }
+    df <- df[df$p_max %in% p_maxs, , drop = FALSE]
+  }
+  has_p_max <- "p_max" %in% names(df) && any(!is.na(df$p_max))
 
   argmax_plot <- ggplot2::ggplot(df, ggplot2::aes(x = argmax_index)) +
     ggplot2::geom_bar() +
@@ -585,10 +620,11 @@ plot_argmax_histogram <- function(result, metric = NULL, alphas = NULL) {
     ) +
     ggplot2::theme_bw()
 
+  facet_cols <- if (has_p_max) ggplot2::vars(alpha, p_max) else ggplot2::vars(alpha)
   if (length(unique(df$metric)) > 1L) {
-    argmax_plot <- argmax_plot + ggplot2::facet_grid(rows = ggplot2::vars(metric), cols = ggplot2::vars(alpha))
+    argmax_plot <- argmax_plot + ggplot2::facet_grid(rows = ggplot2::vars(metric), cols = facet_cols)
   } else {
-    argmax_plot <- argmax_plot + ggplot2::facet_grid(cols = ggplot2::vars(alpha))
+    argmax_plot <- argmax_plot + ggplot2::facet_grid(cols = facet_cols)
   }
   argmax_plot
 }
@@ -610,8 +646,10 @@ plot_argmax_histogram <- function(result, metric = NULL, alphas = NULL) {
 #' @param proportion_method Proportion-generation method (`"beta"` or
 #'   `"fixed_max_beta"`). The fixed-max Beta method places `p_max` at the
 #'   highest index and warns then fails for impossible combinations.
-#' @param p_max      Fixed largest true proportion used by
-#'   `proportion_method = "fixed_max_beta"`.
+#' @param p_max      Fixed largest true proportion(s) used by
+#'   `proportion_method = "fixed_max_beta"`. Can be a numeric vector.
+#'   When multiple values are provided, all alpha × p_max combinations are
+#'   attempted; impossible fixed-max combinations are warned and skipped.
 #' @param model      Sampling model (currently only "multinomial").
 #' @param tie_method Tie-breaking rule for max-error argmax.
 #' @param seed       Optional integer seed for reproducibility.
@@ -620,16 +658,17 @@ plot_argmax_histogram <- function(result, metric = NULL, alphas = NULL) {
 #' @return List with elements:
 #'   \describe{
 #'     \item{inputs}{All input arguments.}
-#'     \item{p_table}{Data.frame with one row per alpha and one column per index
-#'       (`index_1`, ..., `index_K`) containing the corresponding p values.}
+#'     \item{p_table}{Data.frame with one row per simulated alpha/p_max combination and one column per index
+#'       (`index_1`, ..., `index_K`) containing the corresponding p values,
+#'       plus a `p_max` column.}
 #'     \item{replicate_summaries}{Tidy data.frame:
-#'       alpha, replicate, metric, max_error, argmax_index.}
+#'       alpha, p_max, replicate, metric, max_error, argmax_index.}
 #'     \item{errors_long}{Tidy data.frame:
-#'       alpha, replicate, metric, index, error.}
+#'       alpha, p_max, replicate, metric, index, error.}
 #'     \item{curves}{Tidy data.frame:
-#'       alpha, metric, tau, success_rate, mean_n_above.}
+#'       alpha, p_max, metric, tau, success_rate, mean_n_above.}
 #'     \item{argmax_summary}{Tidy data.frame:
-#'       alpha, metric, index, count, fraction, p_value.}
+#'       alpha, p_max, metric, index, count, fraction, p_value.}
 #'   }
 run_simulation_experiment <- function(alpha, K = 10, n, B, taus,
                                       metrics = c("AE", "ARE"),
@@ -640,28 +679,67 @@ run_simulation_experiment <- function(alpha, K = 10, n, B, taus,
                                       seed = NULL, ...) {
   stopifnot(is.numeric(alpha), length(alpha) >= 1L, all(alpha > 0))
 
-  p_table_list <- vector("list", length(alpha))
-  replicate_summaries_list <- vector("list", length(alpha))
-  errors_long_list <- vector("list", length(alpha))
-  curves_list <- vector("list", length(alpha))
-  argmax_summary_list <- vector("list", length(alpha))
+  if (identical(proportion_method, "fixed_max_beta")) {
+    if (is.null(p_max)) {
+      stop("p_max must be provided when proportion_method = 'fixed_max_beta'.", call. = FALSE)
+    }
+    if (!is.numeric(p_max) || any(!is.finite(p_max)) || any(p_max <= 0) || any(p_max >= 1)) {
+      stop("p_max must contain numbers strictly between 0 and 1.", call. = FALSE)
+    }
+    p_max_values <- as.numeric(p_max)
+  } else {
+    p_max_values <- NA_real_
+  }
 
-  for (i in seq_along(alpha)) {
-    alpha_i <- alpha[[i]]
+  combinations <- expand.grid(
+    alpha = alpha,
+    p_max = p_max_values,
+    KEEP.OUT.ATTRS = FALSE,
+    stringsAsFactors = FALSE
+  )
+  n_combinations <- nrow(combinations)
+  p_table_list <- vector("list", n_combinations)
+  replicate_summaries_list <- vector("list", n_combinations)
+  errors_long_list <- vector("list", n_combinations)
+  curves_list <- vector("list", n_combinations)
+  argmax_summary_list <- vector("list", n_combinations)
+  keep <- logical(n_combinations)
+  is_multi_p_max_fixed <- identical(proportion_method, "fixed_max_beta") && length(p_max_values) > 1L
+
+  for (i in seq_len(n_combinations)) {
+    alpha_i <- combinations$alpha[[i]]
+    p_max_i <- combinations$p_max[[i]]
     seed_i <- if (is.null(seed)) NULL else seed + i - 1L
-    p <- generate_proportions(
-      alpha = alpha_i,
-      K = K,
-      method = proportion_method,
-      p_max = p_max
+    p <- tryCatch(
+      generate_proportions(
+        alpha = alpha_i,
+        K = K,
+        method = proportion_method,
+        p_max = if (is.na(p_max_i)) NULL else p_max_i
+      ),
+      error = function(e) {
+        is_impossible_fixed_max <- grepl(
+          "fixed largest proportion is not strictly unique",
+          conditionMessage(e),
+          fixed = TRUE
+        )
+        if (is_multi_p_max_fixed && is_impossible_fixed_max) {
+          return(NULL)
+        }
+        stop(e)
+      }
     )
+    if (is.null(p)) next
+
     rep_out <- run_replicates(
       p, n, B, metrics = metrics, model = model,
       tie_method = tie_method, seed = seed_i, ...
     )
+    keep[[i]] <- TRUE
 
     p_table_list[[i]] <- data.frame(
       alpha = alpha_i,
+      p_max = p_max_i,
       as.list(stats::setNames(as.numeric(p), paste0("index_", seq_len(K)))),
       stringsAsFactors = FALSE,
       check.names = FALSE
@@ -669,6 +747,7 @@ run_simulation_experiment <- function(alpha, K = 10, n, B, taus,
 
     replicate_summaries_list[[i]] <- data.frame(
       alpha = alpha_i,
+      p_max = p_max_i,
       replicate = rep(seq_len(B), times = length(metrics)),
       metric = rep(metrics, each = B),
       max_error = as.vector(rep_out$max_errors[, metrics, drop = FALSE]),
@@ -683,6 +762,7 @@ run_simulation_experiment <- function(alpha, K = 10, n, B, taus,
       if (is.null(dim(errors_m))) errors_m <- matrix(errors_m, nrow = B)
       errors_m_list[[j]] <- data.frame(
         alpha = alpha_i,
+        p_max = p_max_i,
         replicate = rep(seq_len(B), times = ncol(errors_m)),
         metric = m,
         index = rep(seq_len(ncol(errors_m)), each = B),
@@ -694,12 +774,24 @@ run_simulation_experiment <- function(alpha, K = 10, n, B, taus,
 
     curves_i <- evaluate_thresholds(rep_out$max_errors, taus, errors = rep_out$errors)
     curves_i$alpha <- alpha_i
-    curves_list[[i]] <- curves_i[, c("alpha", "metric", "tau", "success_rate", "mean_n_above")]
+    curves_i$p_max <- p_max_i
+    curves_list[[i]] <- curves_i[, c("alpha", "p_max", "metric", "tau", "success_rate", "mean_n_above")]
 
     argmax_i <- summarize_argmax(rep_out$argmax, p)
     argmax_i$alpha <- alpha_i
-    argmax_summary_list[[i]] <- argmax_i[, c("alpha", "metric", "index", "count", "fraction", "p_value")]
+    argmax_i$p_max <- p_max_i
+    argmax_summary_list[[i]] <- argmax_i[, c("alpha", "p_max", "metric", "index", "count", "fraction", "p_value")]
   }
+
+  if (!any(keep)) {
+    stop("No feasible alpha/p_max combinations produced simulation output.", call. = FALSE)
+  }
+
+  p_table_list <- p_table_list[keep]
+  replicate_summaries_list <- replicate_summaries_list[keep]
+  errors_long_list <- errors_long_list[keep]
+  curves_list <- curves_list[keep]
+  argmax_summary_list <- argmax_summary_list[keep]
 
   list(
     inputs = list(alpha = alpha, K = K, n = n, B = B, taus = taus,
