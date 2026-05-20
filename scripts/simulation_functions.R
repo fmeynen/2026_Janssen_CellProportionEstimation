@@ -75,7 +75,7 @@ generate_proportions_beta <- function(alpha, K = 10, grid = default_beta_grid(K)
 #' the Beta-shaped remainder and scaling it to sum to `1 - p_max`, at least one
 #' non-max component is `>= p_max`, so the fixed largest component is no longer
 #' strictly unique.
-warn_fixed_max_beta_impossible <- function(non_max, alpha, K, p_max) {
+fail_fixed_max_beta_impossible <- function(non_max, alpha, K, p_max) {
   warning(
     sprintf(
       paste(
@@ -128,7 +128,7 @@ generate_proportions_fixed_max_beta <- function(alpha, K = 10, p_max,
   remainder <- (1 - p_max) * normalize_to_simplex(remainder_weights)
 
   if (any(remainder >= p_max)) {
-    warn_fixed_max_beta_impossible(
+    fail_fixed_max_beta_impossible(
       non_max = remainder,
       alpha = alpha,
       K = K,

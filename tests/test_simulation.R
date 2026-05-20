@@ -46,8 +46,9 @@ p_dispatch <- generate_proportions(alpha = 2, K = 10, method = "beta")
 if (!identical(p, p_dispatch)) stop("beta dispatcher route should match generate_proportions_beta")
 pass("beta dispatcher route works and is backward-compatible")
 
+fixed_K <- 10L
 err_missing_pmax <- tryCatch(
-  generate_proportions(alpha = 2, K = 10, method = "fixed_max_beta"),
+  generate_proportions(alpha = 2, K = fixed_K, method = "fixed_max_beta"),
   error = function(e) e$message
 )
 if (!grepl("p_max must be provided", err_missing_pmax)) {
@@ -55,17 +56,17 @@ if (!grepl("p_max must be provided", err_missing_pmax)) {
 }
 pass("fixed_max_beta requires p_max")
 
-p_fixed <- generate_proportions(alpha = 2, K = 10, method = "fixed_max_beta", p_max = 0.4)
+p_fixed <- generate_proportions(alpha = 2, K = fixed_K, method = "fixed_max_beta", p_max = 0.4)
 if (abs(sum(p_fixed) - 1) > 1e-12) stop("fixed_max_beta proportions do not sum to 1")
 pass("fixed_max_beta proportions sum to 1")
 
-if (length(p_fixed) != 10L) stop("fixed_max_beta returned wrong length")
+if (length(p_fixed) != fixed_K) stop("fixed_max_beta returned wrong length")
 pass("fixed_max_beta returns length K")
 
-if (abs(p_fixed[10] - 0.4) > 1e-12) stop("fixed_max_beta should place p_max at highest index")
+if (abs(p_fixed[fixed_K] - 0.4) > 1e-12) stop("fixed_max_beta should place p_max at highest index")
 pass("fixed_max_beta fixes largest proportion at highest index")
 
-if (which.max(p_fixed) != 10L || sum(p_fixed == max(p_fixed)) != 1L) {
+if (which.max(p_fixed) != fixed_K || sum(p_fixed == max(p_fixed)) != 1L) {
   stop("fixed_max_beta should produce a strictly unique maximum at the highest index")
 }
 pass("fixed_max_beta maximum is strictly unique")
@@ -289,6 +290,7 @@ if (!identical(res_fixed_method$inputs$proportion_method, "fixed_max_beta")) {
 if (!identical(res_fixed_method$inputs$p_max, 0.4)) {
   stop("run_simulation_experiment should record p_max in inputs")
 }
+# Extract the simulated proportions from the first p_table row's index_* columns.
 fixed_row <- as.numeric(res_fixed_method$p_table[1, grep("^index_", names(res_fixed_method$p_table))])
 if (abs(fixed_row[length(fixed_row)] - 0.4) > 1e-12) {
   stop("run_simulation_experiment should use fixed_max_beta proportions")
