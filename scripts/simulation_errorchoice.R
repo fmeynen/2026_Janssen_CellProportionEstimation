@@ -33,7 +33,7 @@ simulation_errorchoice_defaults <- function() {
     model = "multinomial",
     tie_method = "random",
     proportion_method = "fixed_max_beta",
-    p_max = 0.4,
+    p_max = c(0.3,0.4, 0.5),
     seed = 260926L
   )
 }
@@ -80,4 +80,6 @@ if (is_simulation_errorchoice_main()) {
   plot_success_rate_curve(result, metric = "ARE")
   plot_success_rate_curve(result, metric = NULL)
   plot_success_rate_curve(result, metric = "AE", alphas = c(2, 5))
+  
+  plot_argmax_histogram(result, metric = "AE")
 }
