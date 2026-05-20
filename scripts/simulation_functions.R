@@ -97,10 +97,10 @@ fail_fixed_max_beta_impossible <- function(non_max, alpha, K, p_max) {
     ),
     call. = FALSE
   )
-  stop(
-    fixed_max_beta_impossible_error,
-    call. = FALSE
-  )
+  stop(structure(
+    list(message = fixed_max_beta_impossible_error, call = NULL),
+    class = c("impossible_fixed_max_error", "error", "condition")
+  ))
 }
 
 #' Generate K true proportions with a fixed maximum at the highest index.
@@ -708,7 +708,7 @@ run_simulation_experiment <- function(alpha, K = 10, n, B, taus,
   curves_list <- vector("list", n_combinations)
   argmax_summary_list <- vector("list", n_combinations)
   keep <- logical(n_combinations)
-  skip_impossible <- identical(proportion_method, "fixed_max_beta") &&
+  should_skip_impossible_combinations <- identical(proportion_method, "fixed_max_beta") &&
     length(p_max_values) > 1L
 
   for (i in seq_len(n_combinations)) {
@@ -723,18 +723,13 @@ run_simulation_experiment <- function(alpha, K = 10, n, B, taus,
         p_max = if (is.na(p_max_i)) NULL else p_max_i
       ),
       error = function(e) {
-        is_impossible_fixed_max <- grepl(
-          fixed_max_beta_impossible_error,
-          conditionMessage(e),
-          fixed = TRUE
-        )
-        if (skip_impossible && is_impossible_fixed_max) {
+        if (should_skip_impossible_combinations && inherits(e, "impossible_fixed_max_error")) {
           return(NULL)
         }
         stop(e)
       }
     )
-    if (is.null(p)) next # Skip impossible alpha/p_max combinations in vectorized p_max runs.
+    if (is.null(p)) next # Skip impossible alpha/p_max combinations caught by the error handler.
 
     rep_out <- run_replicates(
       p, n, B, metrics = metrics, model = model,

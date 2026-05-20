@@ -368,6 +368,9 @@ err_plot_pmax <- tryCatch(
 if (!grepl("No rows match the requested p_max", err_plot_pmax)) {
   stop("plot_argmax_histogram should error for unmatched p_max filter")
 }
+if (!identical(err_plot_pmax, "No rows match the requested p_max value(s).")) {
+  stop("plot_argmax_histogram should surface the specific unmatched p_max error")
+}
 pass("plot_argmax_histogram gives informative error for unmatched p_max filter")
 
 # ---- Done ------------------------------------------------------------------
