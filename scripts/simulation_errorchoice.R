@@ -63,12 +63,12 @@ is_simulation_errorchoice_main <- function() {
 
 if (is_simulation_errorchoice_main()) {
   result <- run_simulation_errorchoice()
-
+  
   saveRDS(result, file = "results/simresults/simulation_errorchoice.RData")
 
   cat("True proportions (p):\n")
   print(round(result$p_table, 6))
-  generate_proportions_curve(result$inputs$alpha, K = result$inputs$K)
+  plot_proportions_curve(result = result)
 
   cat("\nSuccess-rate curves (first 10 rows):\n")
   print(head(result$curves, 10))
