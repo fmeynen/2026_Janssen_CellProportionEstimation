@@ -32,6 +32,8 @@ simulation_errorchoice_defaults <- function() {
     metrics = c("AE", "ARE"),
     model = "multinomial",
     tie_method = "random",
+    proportion_method = "fixed_max_beta",
+    p_max = 0.4,
     seed = 260926L
   )
 }
@@ -47,6 +49,8 @@ run_simulation_errorchoice <- function(config = simulation_errorchoice_defaults(
     metrics = config$metrics,
     model = config$model,
     tie_method = config$tie_method,
+    proportion_method = config$proportion_method,
+    p_max = config$p_max,
     seed = config$seed
   )
 }
