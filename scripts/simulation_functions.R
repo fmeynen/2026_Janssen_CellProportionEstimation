@@ -2,7 +2,8 @@
 #
 # Functions for multinomial sampling error simulation.
 # Implements the MVP workflow:
-#   1. Generate true proportions from a Beta curve
+#   1. Generate true proportions from a configurable method-based generator
+#      (currently Beta-based, with placeholders for future extensions)
 #   2. Simulate multinomial counts (with an extension placeholder dispatcher)
 #   3. Compute AE / ARE error metrics
 #   4. Extract max error with configurable tie handling
@@ -21,7 +22,7 @@
 
 #' Rescale nonnegative weights to the probability simplex.
 #'
-#' Internal helper used by `generate_proportions_beta()`.
+#' Internal helper used by proportion-generation methods.
 normalize_to_simplex <- function(w) {
   stopifnot(is.numeric(w), all(is.finite(w)), all(w >= 0), sum(w) > 0)
   w / sum(w)
@@ -61,6 +62,33 @@ generate_proportions_beta <- function(alpha, K = 10, grid = seq(0.05, 0.95, leng
   p <- normalize_to_simplex(w)
   validate_proportions(p)
   p
+}
+
+#' Dispatcher: generate true proportions from the requested method.
+#'
+#' @param alpha   Shape parameter used by the requested generation method.
+#' @param K       Number of cell types (default 10).
+#' @param method  Proportion-generation method; currently only `"beta"` is
+#'   implemented.
+#' @param grid    Evaluation points in (0,1), length K (used by `"beta"`).
+#'
+#' @return Numeric vector of length K, all strictly positive, summing to 1.
+generate_proportions <- function(alpha, K = 10,
+                                 method = c("beta", "fixed_max_beta"),
+                                 grid = seq(0.05, 0.95, length.out = K)) {
+  method <- match.arg(method)
+  switch(method,
+    beta = generate_proportions_beta(alpha = alpha, K = K, grid = grid),
+    fixed_max_beta = stop(
+      paste(
+        "method = 'fixed_max_beta' is not yet implemented.",
+        "Planned Phase 2 behavior: fix the largest true proportion at the highest index",
+        "as a strictly unique maximum; construct a Beta-shaped remainder over K - 1",
+        "components and scale it to sum to 1 - p_max; if any non-max component is >=",
+        "p_max for a given (alpha, K, p_max), warn and fail."
+      )
+    )
+  )
 }
 
 #' Plot normalized Beta(alpha, 1) proportion curves.
@@ -482,8 +510,8 @@ plot_argmax_histogram <- function(result, metric = NULL, alphas = NULL) {
 
 #' Run the full simulation experiment end-to-end.
 #'
-#' @param alpha      Numeric vector; one or more shape1 values for
-#'   Beta(alpha, 1) proportion generation.
+#' @param alpha      Numeric vector; one or more positive shape values used by
+#'   the selected proportion-generation method (default method is Beta-based).
 #' @param K          Number of cell types (default 10).
 #' @param n          Total sample size per replicate.
 #' @param B          Number of replicates.
@@ -491,6 +519,8 @@ plot_argmax_histogram <- function(result, metric = NULL, alphas = NULL) {
 #'   named list with one numeric vector per metric
 #'   (e.g. `list(AE = c(...), ARE = c(...))`).
 #' @param metrics    Error metrics; subset of c("AE", "ARE").
+#' @param proportion_method Proportion-generation method (currently only
+#'   `"beta"` is implemented; `"fixed_max_beta"` is reserved for Phase 2).
 #' @param model      Sampling model (currently only "multinomial").
 #' @param tie_method Tie-breaking rule for max-error argmax.
 #' @param seed       Optional integer seed for reproducibility.
@@ -512,6 +542,7 @@ plot_argmax_histogram <- function(result, metric = NULL, alphas = NULL) {
 #'   }
 run_simulation_experiment <- function(alpha, K = 10, n, B, taus,
                                       metrics = c("AE", "ARE"),
+                                      proportion_method = "beta",
                                       model = "multinomial",
                                       tie_method = "random",
                                       seed = NULL, ...) {
@@ -526,7 +557,7 @@ run_simulation_experiment <- function(alpha, K = 10, n, B, taus,
   for (i in seq_along(alpha)) {
     alpha_i <- alpha[[i]]
     seed_i <- if (is.null(seed)) NULL else seed + i - 1L
-    p <- generate_proportions_beta(alpha = alpha_i, K = K)
+    p <- generate_proportions(alpha = alpha_i, K = K, method = proportion_method)
     rep_out <- run_replicates(
       p, n, B, metrics = metrics, model = model,
       tie_method = tie_method, seed = seed_i, ...
@@ -575,7 +606,8 @@ run_simulation_experiment <- function(alpha, K = 10, n, B, taus,
 
   list(
     inputs = list(alpha = alpha, K = K, n = n, B = B, taus = taus,
-                  metrics = metrics, model = model,
+                  metrics = metrics, proportion_method = proportion_method,
+                  model = model,
                   tie_method = tie_method, seed = seed),
     p_table = do.call(rbind, p_table_list),
     replicate_summaries = do.call(rbind, replicate_summaries_list),
