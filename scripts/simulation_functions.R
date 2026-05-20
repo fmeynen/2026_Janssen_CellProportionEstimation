@@ -150,7 +150,7 @@ generate_proportions_fixed_max_beta <- function(alpha, K = 10, p_max,
       FUN.VALUE = numeric(K)
     ))
     colnames(p_mat) <- paste0("index_", seq_len(K))
-    rownames(p_mat) <- paste0("p_max_", format(p_max, trim = TRUE))
+    rownames(p_mat) <- paste0("p_max_", seq_along(p_max), "_", format(p_max, trim = TRUE))
     return(p_mat)
   }
 
