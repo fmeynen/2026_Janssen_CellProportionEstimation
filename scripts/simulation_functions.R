@@ -599,23 +599,24 @@ plot_success_rate_curve <- function(result, metric = NULL, alphas = NULL,
 #' Plot a histogram of which cell-type proportion drives the maximum error.
 #'
 #' @param result  Output list from `run_simulation_experiment()`.
-#' @param metric  Character scalar. If NULL, plot all metrics (faceted by row).
+#' @param metric  Character scalar; one of `"AE"` or `"ARE"`.
 #' @param alphas  Optional numeric vector; subset of alpha values to plot.
 #' @param p_maxs  Optional numeric vector; subset of p_max values to plot.
 #'
 #' @return A ggplot object.
-plot_argmax_histogram <- function(result, metric = NULL, alphas = NULL, p_maxs = NULL) {
+plot_argmax_histogram <- function(result, metric, alphas = NULL, p_maxs = NULL) {
   stopifnot(
     "result must be a list" = is.list(result),
     "result must contain replicate_summaries" = "replicate_summaries" %in% names(result)
   )
   df <- result$replicate_summaries
-  if (!is.null(metric)) {
-    if (!any(df$metric %in% metric)) {
-      stop("No rows match the requested metric value(s).", call. = FALSE)
-    }
-    df <- df[df$metric %in% metric, , drop = FALSE]
+  if (!is.character(metric) || length(metric) != 1L || is.na(metric) || !(metric %in% c("AE", "ARE"))) {
+    stop("metric must be a single value: 'AE' or 'ARE'.", call. = FALSE)
   }
+  if (!any(df$metric %in% metric)) {
+    stop("No rows match the requested metric value(s).", call. = FALSE)
+  }
+  df <- df[df$metric %in% metric, , drop = FALSE]
   if (!is.null(alphas)) {
     if (!any(df$alpha %in% alphas)) {
       stop("No rows match the requested alpha value(s).", call. = FALSE)
@@ -642,11 +643,10 @@ plot_argmax_histogram <- function(result, metric = NULL, alphas = NULL, p_maxs =
     ) +
     ggplot2::theme_bw()
 
-  facet_cols <- if (has_p_max) ggplot2::vars(alpha, p_max) else ggplot2::vars(alpha)
-  if (length(unique(df$metric)) > 1L) {
-    argmax_plot <- argmax_plot + ggplot2::facet_grid(rows = ggplot2::vars(metric), cols = facet_cols)
+  if (has_p_max) {
+    argmax_plot <- argmax_plot + ggplot2::facet_grid(rows = ggplot2::vars(p_max), cols = ggplot2::vars(alpha))
   } else {
-    argmax_plot <- argmax_plot + ggplot2::facet_grid(cols = facet_cols)
+    argmax_plot <- argmax_plot + ggplot2::facet_grid(cols = ggplot2::vars(alpha))
   }
   argmax_plot
 }

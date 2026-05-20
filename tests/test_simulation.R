@@ -378,6 +378,15 @@ argmax_plot <- plot_argmax_histogram(
 if (!inherits(argmax_plot, "ggplot")) stop("plot_argmax_histogram should return a ggplot object")
 pass("plot_argmax_histogram supports p_max filtering")
 
+err_plot_missing_metric <- tryCatch(
+  plot_argmax_histogram(res_multi_pmax),
+  error = function(e) e$message
+)
+if (!grepl("metric must be a single value", err_plot_missing_metric)) {
+  stop("plot_argmax_histogram should require a valid metric")
+}
+pass("plot_argmax_histogram requires metric")
+
 err_plot_pmax <- tryCatch(
   plot_argmax_histogram(res_multi_pmax, metric = "AE", p_maxs = 0.4),
   error = function(e) e$message
@@ -386,6 +395,21 @@ if (!grepl("No rows match the requested p_max", err_plot_pmax)) {
   stop("plot_argmax_histogram should error for unmatched p_max filter")
 }
 pass("plot_argmax_histogram gives informative error for unmatched p_max filter")
+
+res_hist_grid <- run_simulation_experiment(
+  alpha = c(2, 3, 4),
+  K = 10L, n = 50L, B = 5L,
+  taus = c(0.05, 0.10),
+  proportion_method = "fixed_max_beta",
+  p_max = c(0.6, 0.8),
+  seed = 17L
+)
+argmax_plot_grid <- plot_argmax_histogram(res_hist_grid, metric = "AE")
+layout_grid <- ggplot2::ggplot_build(argmax_plot_grid)$layout$layout
+if (length(unique(layout_grid$COL)) != 3L || length(unique(layout_grid$ROW)) != 2L) {
+  stop("plot_argmax_histogram should facet with alpha in columns and p_max in rows")
+}
+pass("plot_argmax_histogram facets with alpha columns and p_max rows")
 
 # ---- Done ------------------------------------------------------------------
 cat("\nAll tests passed.\n")
