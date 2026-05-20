@@ -9,6 +9,8 @@ output:
 params:
   alpha: 
     value: [2, 2.5, 3, 4, 5]
+  p_max:
+    value: [0.2, 0.3, 0.4, 0.5, 0.6]
   K: 10
   n: 1000
   B: 5000
@@ -41,7 +43,7 @@ For each \(\alpha\), the workflow:
 base_config <- simulation_errorchoice_defaults()
 taus <- base_config$taus
 
-config <- list(
+config_beta <- list(
   alpha = as.numeric(params$alpha),
   K = as.integer(params$K),
   n = as.integer(params$n),
@@ -49,6 +51,21 @@ config <- list(
   taus = taus,
   metrics = c("AE", "ARE"),
   model = "multinomial",
+  proportion_method = "beta",
+  tie_method = "random",
+  seed = as.integer(params$seed)
+)
+
+config_pmax <- list(
+  alpha = as.numeric(params$alpha),
+  p_max = as.numeric(params$p_max),
+  K = as.integer(params$K),
+  n = as.integer(params$n),
+  B = as.integer(params$B),
+  taus = taus,
+  metrics = c("AE", "ARE"),
+  model = "multinomial",
+  proportion_method = "fixed_max_beta",
   tie_method = "random",
   seed = as.integer(params$seed)
 )
@@ -56,14 +73,14 @@ config <- list(
 setup_table <- data.frame(
   item = c("alpha", "K", "n", "B", "metrics", "model", "tie_method", "seed"),
   value = c(
-    paste(config$alpha, collapse = ", "),
-    config$K,
-    config$n,
-    config$B,
-    paste(config$metrics, collapse = ", "),
-    config$model,
-    config$tie_method,
-    config$seed
+    paste(config_beta$alpha, collapse = ", "),
+    config_beta$K,
+    config_beta$n,
+    config_beta$B,
+    paste(config_beta$metrics, collapse = ", "),
+    config_beta$model,
+    config_beta$tie_method,
+    config_beta$seed
   ),
   stringsAsFactors = FALSE
 )
@@ -77,7 +94,8 @@ knitr::kable(
 ```
 
 ```{r run-simulation}
-result <- run_simulation_errorchoice(config)
+result_beta <- run_simulation_errorchoice(config_beta)
+result_pmax <- run_simulation_errorchoice(config_pmax)
 ```
 \newpage
 # True proportions from Beta(\(\alpha, 1\))
@@ -87,22 +105,23 @@ The 10 cell types are given proportions equal to the 0.05, 0.15, 0.25, ...0.85, 
 Larger values of \(\alpha\) tend to result in more small-proportion cell types.
 
 ```{r proportion-curves, fig.cap="Weighted Beta(alpha,1) curves and grid-point proportions by alpha."}
-plot_proportions_curve(result)
+plot_proportions_curve(result_beta)
 ```
 
 ```{r proportion-table}
-p_table <- round(result$p_table, digits = 4)
-value_cols <- grep("^index_", names(p_table), value = TRUE)
-p_table[value_cols] <- lapply(p_table[value_cols], function(x) signif(x, 6))
+p_table <- round(result_beta$p_table, digits = 5)
+p_table <- p_table[, !names(p_table) %in% "p_max"]
 knitr::kable(p_table, caption = "True proportion values by alpha and cell-type index.")
 ```
+
 \newpage
+
 # Success-rate curves
 
 The success-rate curves show the probability of success (i.e. P(max(error)< threshold)) for different thresholds.
 
 ```{r success-rate-curves-both, fig.cap="Success-rate curves by alpha, shown separately for AE and ARE."}
-plot_success_rate_curve(result, metric = NULL)
+plot_success_rate_curve(result_beta, metric = NULL)
 ```
 
 For the AE, success rate curves are very similar for different true proportions vectors, with a 95% success rate for thresholds between 0.3 and 0.35.
@@ -117,23 +136,49 @@ The argmax histograms show the index at which the error is largest (larger indic
 As expected, AE is largest for larger true proportions \(p\) (closer to 0.5). However, smaller proportions can still contribute to the largest AE.
 
 ```{r argmax-hist-ae, fig.cap="Argmax histograms by alpha for AE maximum-error indices."}
-plot_argmax_histogram(result, metric = "AE")
+plot_argmax_histogram(result_beta, metric = "AE")
 ```
 
 
 ```{r argmax-hist-are, fig.cap="Argmax histograms by alpha for ARE maximum-error indices."}
-plot_argmax_histogram(result, metric = "ARE")
+plot_argmax_histogram(result_beta, metric = "ARE")
 ```
 
 The ARE is driven mostly by the 2-3 cell types with the smallest proportion. Note for \(\alpha = 5\), the 2nd smallest proportion actually has the largest ARE, most of the time. The smallest proportion will often have a simulated cell count of 0, resulting in an ARE of exactly 1. The second smallest proportion then has a possibility to show a larger ARE.
 
+\newpage
 
+# Keep highest proportion fixed, vary other proportions
 
+## Simulation proportions
+
+The highest proportions are kept constant (0.2, 0.3, 0.4, 0.5, 0.6), with the other proportions varying based on a beta distribution (as before). Some values of alpha would lead to some of the remaining proportions to be larger than the maximal proportion and are thus excluded.
+
+```{r proportion-curves-pmax, fig.cap="Grid-point proportions by alpha (columns), and maximal proportions (rows)."}
+plot_proportions_curve(result_pmax)
+```
+
+```{r proportion-table-pmax}
+p_table <- round(result_pmax$p_table, digits = 5)
+knitr::kable(p_table, caption = "True proportion values by alpha, maximal proportion and cell-type index.")
+```
+
+## Results
+
+The highest proportion (closest to 0.5) has most often the largest AE.
+Additionally, for a given maximal proportion, the number of times this maximal proportion results in the largest AE seems to be stable over all values of alpha.
+
+```{r argmax-hist-ae-pmax, fig.cap="Argmax histograms by alpha (columns) and maximal proportion (rows) for AE maximum-error indices."}
+plot_argmax_histogram(result_pmax, metric = "AE")
+```
+
+This could be repeated with a constant minimal proportion to check the effect on ARE.
 
 \newpage
 
 # Next steps
 * Repeat with overdispersion (dirichlet multinomial)
+* Repeat with a fixed minimal proportion and check the effect on the ARE
 * Find a cutoff for when to choose AE vs ARE
   * Idea: for a given threshold for AE and ARE, which cutoff for \(\hat{p}\) maximizes the success-rate
 * Hierarchical distributions
