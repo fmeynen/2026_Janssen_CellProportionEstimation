@@ -614,7 +614,7 @@ plot_argmax_histogram <- function(result, metric, alphas = NULL, p_maxs = NULL) 
     stop("metric must be a single value: 'AE' or 'ARE'.", call. = FALSE)
   }
   if (!any(df$metric %in% metric)) {
-    stop("No rows match the requested metric value(s).", call. = FALSE)
+    stop("No rows match the requested metric value.", call. = FALSE)
   }
   df <- df[df$metric %in% metric, , drop = FALSE]
   if (!is.null(alphas)) {
