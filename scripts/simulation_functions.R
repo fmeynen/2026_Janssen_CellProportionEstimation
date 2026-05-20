@@ -513,6 +513,10 @@ plot_proportions_curve <- function(result) {
   n_rows <- nrow(p_table)
   curve_rows <- vector("list", n_rows)
   point_rows <- vector("list", n_rows)
+  curve_upper_bound <- NA_real_
+  if (identical(method, "fixed_max_beta")) {
+    curve_upper_bound <- default_beta_grid(K - 1L)[K - 1L]
+  }
 
   for (i in seq_len(n_rows)) {
     alpha_i <- as.numeric(p_table$alpha[[i]])
@@ -526,15 +530,15 @@ plot_proportions_curve <- function(result) {
       f <- dbeta(s, shape1 = alpha_i, shape2 = 1) / sum(w)
       x_points <- grid_i
     } else {
+      fixed_max_point_x <- 1
       if (!is.finite(p_max_i)) {
         stop("result$p_table must contain finite p_max values for fixed_max_beta.", call. = FALSE)
       }
       grid_i <- default_beta_grid(K - 1L)
       w <- dbeta(grid_i, shape1 = alpha_i, shape2 = 1)
-      fixed_curve_upper <- 0.95
-      s <- seq(0, fixed_curve_upper, length.out = 1000)
+      s <- seq(0, curve_upper_bound, length.out = 1000)
       f <- (1 - p_max_i) * dbeta(s, shape1 = alpha_i, shape2 = 1) / sum(w)
-      x_points <- c(grid_i, 1)
+      x_points <- c(grid_i, fixed_max_point_x)
     }
 
     curve_rows[[i]] <- data.frame(
@@ -558,8 +562,8 @@ plot_proportions_curve <- function(result) {
   alpha_levels <- unique(p_table$alpha)
   curve_df$alpha <- factor(curve_df$alpha, levels = alpha_levels)
   point_df$alpha <- factor(point_df$alpha, levels = alpha_levels)
-  if ("p_max" %in% names(p_table)) {
-    p_max_levels <- unique(p_table$p_max[is.finite(p_table$p_max)])
+  if (identical(method, "fixed_max_beta") && "p_max" %in% names(p_table)) {
+    p_max_levels <- unique(p_table$p_max)
     curve_df$p_max <- factor(curve_df$p_max, levels = p_max_levels)
     point_df$p_max <- factor(point_df$p_max, levels = p_max_levels)
   }

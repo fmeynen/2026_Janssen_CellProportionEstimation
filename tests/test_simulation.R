@@ -371,10 +371,11 @@ pass("plot_proportions_curve supports fixed_max_beta simulation results")
 fixed_plot_build <- ggplot2::ggplot_build(proportions_plot_fixed)
 fixed_curve_x <- fixed_plot_build$data[[1]]$x
 fixed_point_x <- fixed_plot_build$data[[2]]$x
-if (!any(abs(fixed_point_x - 1) < 1e-12)) {
+comparison_tol <- 1e-12
+if (!any(abs(fixed_point_x - 1) < comparison_tol)) {
   stop("fixed_max_beta plot should include the fixed-maximum point at x = 1")
 }
-if (any(abs(fixed_curve_x - 1) < 1e-12)) {
+if (any(abs(fixed_curve_x - 1) < comparison_tol)) {
   stop("fixed_max_beta plot curve should exclude x = 1 so the fixed maximum is not on the curve")
 }
 pass("fixed_max_beta plot excludes the fixed maximum point from the curve")
