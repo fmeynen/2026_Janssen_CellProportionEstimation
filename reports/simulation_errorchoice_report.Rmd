@@ -114,13 +114,21 @@ Note the jump in success rate for the ARE when threshold \(\tau = 1\). Since ARE
 # Argmax histograms
 The argmax histograms show the index at which the error is largest (larger indices represent larger true probabilities). In case of a tie, one index is chosen at random.
 
-```{r argmax-hist-both, fig.cap="Argmax histograms by alpha and metric for maximum-error indices."}
-plot_argmax_histogram(result, metric = NULL)
+As expected, AE is largest for larger true proportions \(p\) (closer to 0.5). However, smaller proportions can still contribute to the largest AE.
+
+```{r argmax-hist-ae, fig.cap="Argmax histograms by alpha for AE maximum-error indices."}
+plot_argmax_histogram(result, metric = "AE")
 ```
 
-As expected, AE (top row) is largest for larger true proportions \(p\). However, smaller proportions can still contribute to the largest AE.
 
-The ARE (bottom row) is driven mostly by the 2-3 cell types with the smallest proportion. Note for \(\alpha = 5\), the 2nd smallest proportion actually has the largest ARE, most of the time. The smallest proportion will often have a simulated cell count of 0, resulting in an ARE of exactly 1. The second smallest proportion then has a possibility to show a larger ARE.
+```{r argmax-hist-are, fig.cap="Argmax histograms by alpha for ARE maximum-error indices."}
+plot_argmax_histogram(result, metric = "ARE")
+```
+
+The ARE is driven mostly by the 2-3 cell types with the smallest proportion. Note for \(\alpha = 5\), the 2nd smallest proportion actually has the largest ARE, most of the time. The smallest proportion will often have a simulated cell count of 0, resulting in an ARE of exactly 1. The second smallest proportion then has a possibility to show a larger ARE.
+
+
+
 
 \newpage
 

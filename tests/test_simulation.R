@@ -71,6 +71,23 @@ if (which.max(p_fixed) != fixed_K || sum(p_fixed == max(p_fixed)) != 1L) {
 }
 pass("fixed_max_beta maximum is strictly unique")
 
+p_fixed_multi <- generate_proportions_fixed_max_beta(alpha = 2, K = fixed_K, p_max = c(0.3, 0.4))
+if (!is.matrix(p_fixed_multi) || nrow(p_fixed_multi) != 2L || ncol(p_fixed_multi) != fixed_K) {
+  stop("fixed_max_beta should return a matrix for vector p_max")
+}
+pass("fixed_max_beta returns a matrix for vector p_max")
+if (any(abs(rowSums(p_fixed_multi) - 1) > 1e-12)) {
+  stop("fixed_max_beta vector p_max rows should sum to 1")
+}
+pass("fixed_max_beta vector p_max rows sum to 1")
+if (any(abs(p_fixed_multi[, fixed_K] - c(0.3, 0.4)) > 1e-12)) {
+  stop("fixed_max_beta vector p_max should place each p_max at highest index")
+}
+if (!all(apply(p_fixed_multi, 1, function(row) which.max(row) == fixed_K && sum(row == max(row)) == 1L))) {
+  stop("fixed_max_beta vector p_max should preserve strict unique maximum at highest index")
+}
+pass("fixed_max_beta vector p_max preserves strict unique maximum")
+
 warn_fixed_max <- NULL
 err_fixed_max <- tryCatch(
   withCallingHandlers(
@@ -276,6 +293,8 @@ pass("replicate_summaries row count correct")
 
 if (nrow(res$curves) != 3L * 2L) stop("curves has wrong row count")
 pass("curves row count correct")
+if (!("p_max" %in% names(res$curves))) stop("curves should include p_max metadata")
+pass("curves includes p_max metadata")
 
 res_fixed_method <- run_simulation_experiment(
   alpha = 2, K = 10L, n = 100L, B = 5L,
@@ -289,6 +308,9 @@ if (!identical(res_fixed_method$inputs$proportion_method, "fixed_max_beta")) {
 }
 if (!identical(res_fixed_method$inputs$p_max, 0.4)) {
   stop("run_simulation_experiment should record p_max in inputs")
+}
+if (!all(res_fixed_method$p_table$p_max == 0.4)) {
+  stop("run_simulation_experiment should record p_max in p_table rows")
 }
 # Extract the proportions from the first simulation's index_1 ... index_K columns in p_table.
 proportion_columns <- paste0("index_", seq_len(res_fixed_method$inputs$K))
@@ -310,6 +332,86 @@ res_list <- run_simulation_experiment(
 if (nrow(res_list$curves[res_list$curves$metric == "AE",  ]) != 2L) stop("named-list: AE curve row count wrong")
 if (nrow(res_list$curves[res_list$curves$metric == "ARE", ]) != 3L) stop("named-list: ARE curve row count wrong")
 pass("run_simulation_experiment: named-list taus produces correct per-metric row counts")
+
+warn_multi_pmax <- character()
+res_multi_pmax <- withCallingHandlers(
+  run_simulation_experiment(
+    alpha = c(2, 3),
+    K = 2L, n = 100L, B = 5L,
+    taus = c(0.05, 0.10),
+    proportion_method = "fixed_max_beta",
+    p_max = c(0.4, 0.8),
+    seed = 11L
+  ),
+  warning = function(w) {
+    warn_multi_pmax <<- c(warn_multi_pmax, conditionMessage(w))
+    invokeRestart("muffleWarning")
+  }
+)
+if (!any(grepl("Impossible fixed_max_beta combination", warn_multi_pmax))) {
+  stop("multi-p_max run should warn for impossible combinations")
+}
+pass("multi-p_max run warns for impossible combinations")
+if (!setequal(unique(res_multi_pmax$curves$p_max), 0.8)) {
+  stop("multi-p_max run should skip impossible combinations and keep feasible p_max only")
+}
+pass("multi-p_max run skips impossible combinations and keeps feasible ones")
+
+# ---- 9. plotting helpers: p_max filters -------------------------------------
+cat("\n9. plotting helper filters\n")
+
+success_plot <- plot_success_rate_curve(
+  res_multi_pmax,
+  metric = "AE",
+  alphas = c(2, 3),
+  p_maxs = 0.8
+)
+if (!inherits(success_plot, "ggplot")) stop("plot_success_rate_curve should return a ggplot object")
+pass("plot_success_rate_curve supports p_max filtering")
+
+argmax_plot <- plot_argmax_histogram(
+  res_multi_pmax,
+  metric = "AE",
+  alphas = c(2, 3),
+  p_maxs = 0.8
+)
+if (!inherits(argmax_plot, "ggplot")) stop("plot_argmax_histogram should return a ggplot object")
+pass("plot_argmax_histogram supports p_max filtering")
+
+err_plot_missing_metric <- tryCatch(
+  plot_argmax_histogram(res_multi_pmax),
+  error = function(e) e$message
+)
+if (!identical(err_plot_missing_metric, "metric must be a single value: 'AE' or 'ARE'.")) {
+  stop("plot_argmax_histogram should require a valid metric")
+}
+pass("plot_argmax_histogram requires metric")
+
+err_plot_pmax <- tryCatch(
+  plot_argmax_histogram(res_multi_pmax, metric = "AE", p_maxs = 0.4),
+  error = function(e) e$message
+)
+if (!grepl("No rows match the requested p_max", err_plot_pmax)) {
+  stop("plot_argmax_histogram should error for unmatched p_max filter")
+}
+pass("plot_argmax_histogram gives informative error for unmatched p_max filter")
+
+res_hist_grid <- run_simulation_experiment(
+  alpha = c(2, 3, 4),
+  K = 10L, n = 50L, B = 5L,
+  taus = c(0.05, 0.10),
+  proportion_method = "fixed_max_beta",
+  p_max = c(0.6, 0.8),
+  seed = 17L
+)
+argmax_plot_grid <- plot_argmax_histogram(res_hist_grid, metric = "AE")
+layout_grid <- ggplot2::ggplot_build(argmax_plot_grid)$layout$layout
+expected_alpha_n <- length(unique(res_hist_grid$replicate_summaries$alpha))
+expected_p_max_n <- length(unique(res_hist_grid$replicate_summaries$p_max))
+if (length(unique(layout_grid$COL)) != expected_alpha_n || length(unique(layout_grid$ROW)) != expected_p_max_n) {
+  stop("plot_argmax_histogram should facet with alpha in columns and p_max in rows")
+}
+pass("plot_argmax_histogram facets with alpha columns and p_max rows")
 
 # ---- Done ------------------------------------------------------------------
 cat("\nAll tests passed.\n")
