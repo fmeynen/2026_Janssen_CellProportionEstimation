@@ -3,7 +3,7 @@
 # Functions for multinomial sampling error simulation.
 # Implements the MVP workflow:
 #   1. Generate true proportions from a configurable method-based generator
-#      (currently Beta-based, with placeholders for future extensions)
+#      (currently Beta and fixed-max Beta, with placeholders for future extensions)
 #   2. Simulate multinomial counts (with an extension placeholder dispatcher)
 #   3. Compute AE / ARE error metrics
 #   4. Extract max error with configurable tie handling
@@ -28,6 +28,14 @@ normalize_to_simplex <- function(w) {
   w / sum(w)
 }
 
+#' Default evaluation grid for Beta-based proportion generators.
+#'
+#' Returns a shared interior grid of the requested length. The fixed-max Beta
+#' generator reuses this helper with `K - 1` points for its non-max remainder.
+default_beta_grid <- function(K) {
+  seq(0.05, 0.95, length.out = K)
+}
+
 #' Validate that `p` is a proper proportion vector.
 #'
 #' Checks: numeric, strictly positive, finite, sums to 1 within `tol`.
@@ -46,7 +54,7 @@ validate_proportions <- function(p, tol = 1e-12) {
 #' @param alpha  shape1 parameter of Beta(alpha, 1); controls curve steepness.
 #' @param K      number of cell types (default 10).
 #' @param grid   evaluation points in (0,1) (default K equidistant points from
-#'               0.1 to 0.9, avoiding boundary values where dbeta returns 0).
+#'               0.05 to 0.95, avoiding boundary values where dbeta returns 0).
 #'
 #' @return Numeric vector of length K, all strictly positive, summing to 1.
 #'
@@ -55,7 +63,7 @@ validate_proportions <- function(p, tol = 1e-12) {
 #' The default grid avoids 0 and 1 so that all weights — and therefore all
 #' proportions — are strictly positive.  This prevents ARE from producing
 #' NaN or Inf values for any cell type under the default parameters.
-generate_proportions_beta <- function(alpha, K = 10, grid = seq(0.05, 0.95, length.out = K)) {
+generate_proportions_beta <- function(alpha, K = 10, grid = default_beta_grid(K)) {
   stopifnot(is.numeric(alpha), length(alpha) == 1L, alpha > 0)
   stopifnot(length(grid) == K)
   w <- dbeta(grid, shape1 = alpha, shape2 = 1)
@@ -64,30 +72,108 @@ generate_proportions_beta <- function(alpha, K = 10, grid = seq(0.05, 0.95, leng
   p
 }
 
+#' Warn and fail when fixed-max Beta proportions cannot keep a unique maximum.
+#'
+#' An impossible combination is defined exactly as follows: after constructing
+#' the Beta-shaped remainder and scaling it to sum to `1 - p_max`, at least one
+#' non-max component is `>= p_max`, so the fixed largest component is no longer
+#' strictly unique.
+fail_fixed_max_beta_impossible <- function(non_max, alpha, K, p_max) {
+  warning(
+    sprintf(
+      paste(
+        "Impossible fixed_max_beta combination for alpha=%s, K=%s, p_max=%s:",
+        "after scaling the Beta-shaped remainder to sum to 1 - p_max,",
+        "at least one non-max component is >= p_max (max non-max = %s)."
+      ),
+      format(alpha, trim = TRUE),
+      K,
+      format(p_max, trim = TRUE),
+      format(max(non_max), trim = TRUE)
+    ),
+    call. = FALSE
+  )
+  stop(
+    "method = 'fixed_max_beta' failed because the fixed largest proportion is not strictly unique.",
+    call. = FALSE
+  )
+}
+
+#' Generate K true proportions with a fixed maximum at the highest index.
+#'
+#' @param alpha  shape1 parameter of the Beta(alpha, 1) remainder curve.
+#' @param K      number of cell types (default 10; must be at least 2).
+#' @param p_max  fixed largest true proportion, placed at the highest index.
+#' @param grid   evaluation points in (0,1), length K - 1, used to construct
+#'               the Beta-shaped remainder over the first K - 1 indices.
+#'
+#' @return Numeric vector of length K, all strictly positive, summing to 1,
+#'   with a strictly unique largest value at index K.
+#'
+#' @details
+#' The first `K - 1` proportions are built from Beta(alpha, 1) weights,
+#' normalized and then rescaled to sum to `1 - p_max`. The final proportion is
+#' set to `p_max`, so the largest true proportion is fixed at the highest
+#' index. If the rescaled remainder contains any value `>= p_max`, the
+#' combination of `alpha`, `K`, and `p_max` is impossible for a strictly unique
+#' fixed maximum; the function warns and then fails.
+generate_proportions_fixed_max_beta <- function(alpha, K = 10, p_max,
+                                                grid = default_beta_grid(K - 1L)) {
+  if (!is.numeric(alpha) || length(alpha) != 1L || !is.finite(alpha) || alpha <= 0) {
+    stop("alpha must be a single positive number.", call. = FALSE)
+  }
+  if (!is.numeric(K) || length(K) != 1L || !is.finite(K) || K %% 1 != 0 || K < 2L) {
+    stop("K must be a single integer >= 2 for method = 'fixed_max_beta'.", call. = FALSE)
+  }
+  if (is.null(p_max)) {
+    stop("p_max must be provided when method = 'fixed_max_beta'.", call. = FALSE)
+  }
+  if (!is.numeric(p_max) || length(p_max) != 1L || !is.finite(p_max) || p_max <= 0 || p_max >= 1) {
+    stop("p_max must be a single number strictly between 0 and 1.", call. = FALSE)
+  }
+  if (length(grid) != K - 1L) {
+    stop("grid must have length K - 1 for method = 'fixed_max_beta'.", call. = FALSE)
+  }
+
+  remainder_weights <- dbeta(grid, shape1 = alpha, shape2 = 1)
+  remainder <- (1 - p_max) * normalize_to_simplex(remainder_weights)
+
+  if (any(remainder >= p_max)) {
+    fail_fixed_max_beta_impossible(
+      non_max = remainder,
+      alpha = alpha,
+      K = K,
+      p_max = p_max
+    )
+  }
+
+  p <- c(remainder, p_max)
+  validate_proportions(p)
+  p
+}
+
 #' Dispatcher: generate true proportions from the requested method.
 #'
 #' @param alpha   Shape parameter used by the requested generation method.
 #' @param K       Number of cell types (default 10).
-#' @param method  Proportion-generation method; currently only `"beta"` is
-#'   implemented.
+#' @param method  Proportion-generation method: `"beta"` or `"fixed_max_beta"`.
+#' @param p_max   Fixed largest true proportion for `"fixed_max_beta"`. The
+#'   largest value is always placed at the highest index and must remain
+#'   strictly unique; impossible combinations warn and fail.
 #' @param grid    Evaluation points in (0,1), length K (used by `"beta"`).
 #'
 #' @return Numeric vector of length K, all strictly positive, summing to 1.
 generate_proportions <- function(alpha, K = 10,
                                  method = c("beta", "fixed_max_beta"),
-                                 grid = seq(0.05, 0.95, length.out = K)) {
+                                 p_max = NULL,
+                                 grid = default_beta_grid(K)) {
   method <- match.arg(method)
   switch(method,
     beta = generate_proportions_beta(alpha = alpha, K = K, grid = grid),
-    fixed_max_beta = stop(
-      paste(
-        "method = 'fixed_max_beta' is not yet implemented.",
-        "Planned Phase 2 behavior: fix the largest true proportion at the highest index",
-        "as a strictly unique maximum; construct a Beta-shaped remainder over K - 1",
-        "components and scale it to sum to 1 - p_max; if any non-max component is >=",
-        "p_max for a given (alpha, K, p_max), emit a warning with diagnostics",
-        "and then stop with an error (warn + fail)."
-      )
+    fixed_max_beta = generate_proportions_fixed_max_beta(
+      alpha = alpha,
+      K = K,
+      p_max = p_max
     )
   )
 }
@@ -520,8 +606,11 @@ plot_argmax_histogram <- function(result, metric = NULL, alphas = NULL) {
 #'   named list with one numeric vector per metric
 #'   (e.g. `list(AE = c(...), ARE = c(...))`).
 #' @param metrics    Error metrics; subset of c("AE", "ARE").
-#' @param proportion_method Proportion-generation method (currently only
-#'   `"beta"` is implemented; `"fixed_max_beta"` is reserved for Phase 2).
+#' @param proportion_method Proportion-generation method (`"beta"` or
+#'   `"fixed_max_beta"`). The fixed-max Beta method places `p_max` at the
+#'   highest index and warns then fails for impossible combinations.
+#' @param p_max      Fixed largest true proportion used by
+#'   `proportion_method = "fixed_max_beta"`.
 #' @param model      Sampling model (currently only "multinomial").
 #' @param tie_method Tie-breaking rule for max-error argmax.
 #' @param seed       Optional integer seed for reproducibility.
@@ -544,6 +633,7 @@ plot_argmax_histogram <- function(result, metric = NULL, alphas = NULL) {
 run_simulation_experiment <- function(alpha, K = 10, n, B, taus,
                                       metrics = c("AE", "ARE"),
                                       proportion_method = "beta",
+                                      p_max = NULL,
                                       model = "multinomial",
                                       tie_method = "random",
                                       seed = NULL, ...) {
@@ -558,7 +648,12 @@ run_simulation_experiment <- function(alpha, K = 10, n, B, taus,
   for (i in seq_along(alpha)) {
     alpha_i <- alpha[[i]]
     seed_i <- if (is.null(seed)) NULL else seed + i - 1L
-    p <- generate_proportions(alpha = alpha_i, K = K, method = proportion_method)
+    p <- generate_proportions(
+      alpha = alpha_i,
+      K = K,
+      method = proportion_method,
+      p_max = p_max
+    )
     rep_out <- run_replicates(
       p, n, B, metrics = metrics, model = model,
       tie_method = tie_method, seed = seed_i, ...
@@ -608,6 +703,7 @@ run_simulation_experiment <- function(alpha, K = 10, n, B, taus,
   list(
     inputs = list(alpha = alpha, K = K, n = n, B = B, taus = taus,
                   metrics = metrics, proportion_method = proportion_method,
+                  p_max = p_max,
                   model = model,
                   tie_method = tie_method, seed = seed),
     p_table = do.call(rbind, p_table_list),
