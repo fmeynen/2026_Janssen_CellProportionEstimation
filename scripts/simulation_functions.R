@@ -49,6 +49,10 @@ validate_proportions <- function(p, tol = 1e-12) {
   invisible(p)
 }
 
+fixed_max_beta_impossible_error <- paste(
+  "method = 'fixed_max_beta' failed because the fixed largest proportion is not strictly unique."
+)
+
 #' Generate K true proportions from dbeta(grid, alpha, 1), always rescaled.
 #'
 #' @param alpha  shape1 parameter of Beta(alpha, 1); controls curve steepness.
@@ -94,7 +98,7 @@ fail_fixed_max_beta_impossible <- function(non_max, alpha, K, p_max) {
     call. = FALSE
   )
   stop(
-    "method = 'fixed_max_beta' failed because the fixed largest proportion is not strictly unique.",
+    fixed_max_beta_impossible_error,
     call. = FALSE
   )
 }
@@ -704,7 +708,7 @@ run_simulation_experiment <- function(alpha, K = 10, n, B, taus,
   curves_list <- vector("list", n_combinations)
   argmax_summary_list <- vector("list", n_combinations)
   keep <- logical(n_combinations)
-  should_skip_impossible_combinations <- identical(proportion_method, "fixed_max_beta") &&
+  skip_impossible <- identical(proportion_method, "fixed_max_beta") &&
     length(p_max_values) > 1L
 
   for (i in seq_len(n_combinations)) {
@@ -720,17 +724,17 @@ run_simulation_experiment <- function(alpha, K = 10, n, B, taus,
       ),
       error = function(e) {
         is_impossible_fixed_max <- grepl(
-          "fixed largest proportion is not strictly unique",
+          fixed_max_beta_impossible_error,
           conditionMessage(e),
           fixed = TRUE
         )
-        if (should_skip_impossible_combinations && is_impossible_fixed_max) {
+        if (skip_impossible && is_impossible_fixed_max) {
           return(NULL)
         }
         stop(e)
       }
     )
-    if (is.null(p)) next
+    if (is.null(p)) next # Skip impossible alpha/p_max combinations in vectorized p_max runs.
 
     rep_out <- run_replicates(
       p, n, B, metrics = metrics, model = model,
