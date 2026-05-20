@@ -71,6 +71,23 @@ if (which.max(p_fixed) != fixed_K || sum(p_fixed == max(p_fixed)) != 1L) {
 }
 pass("fixed_max_beta maximum is strictly unique")
 
+p_fixed_multi <- generate_proportions_fixed_max_beta(alpha = 2, K = fixed_K, p_max = c(0.3, 0.4))
+if (!is.matrix(p_fixed_multi) || nrow(p_fixed_multi) != 2L || ncol(p_fixed_multi) != fixed_K) {
+  stop("fixed_max_beta should return a matrix for vector p_max")
+}
+pass("fixed_max_beta returns a matrix for vector p_max")
+if (any(abs(rowSums(p_fixed_multi) - 1) > 1e-12)) {
+  stop("fixed_max_beta vector p_max rows should sum to 1")
+}
+pass("fixed_max_beta vector p_max rows sum to 1")
+if (any(abs(p_fixed_multi[, fixed_K] - c(0.3, 0.4)) > 1e-12)) {
+  stop("fixed_max_beta vector p_max should place each p_max at highest index")
+}
+if (!all(apply(p_fixed_multi, 1, function(row) which.max(row) == fixed_K && sum(row == max(row)) == 1L))) {
+  stop("fixed_max_beta vector p_max should preserve strict unique maximum at highest index")
+}
+pass("fixed_max_beta vector p_max preserves strict unique maximum")
+
 warn_fixed_max <- NULL
 err_fixed_max <- tryCatch(
   withCallingHandlers(

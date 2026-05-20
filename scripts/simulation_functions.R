@@ -107,12 +107,14 @@ fail_fixed_max_beta_impossible <- function(non_max, alpha, K, p_max) {
 #'
 #' @param alpha  shape1 parameter of the Beta(alpha, 1) remainder curve.
 #' @param K      number of cell types (default 10; must be at least 2).
-#' @param p_max  fixed largest true proportion, placed at the highest index.
+#' @param p_max  fixed largest true proportion(s), placed at the highest index.
 #' @param grid   evaluation points in (0,1), length K - 1, used to construct
 #'               the Beta-shaped remainder over the first K - 1 indices.
 #'
-#' @return Numeric vector of length K, all strictly positive, summing to 1,
-#'   with a strictly unique largest value at index K.
+#' @return If `length(p_max) == 1`, a numeric vector of length K, all strictly
+#'   positive, summing to 1, with a strictly unique largest value at index K.
+#'   If `length(p_max) > 1`, a numeric matrix with one row per `p_max` value
+#'   and K columns (`index_1`, ..., `index_K`).
 #'
 #' @details
 #' The first `K - 1` proportions are built from Beta(alpha, 1) weights,
@@ -120,7 +122,8 @@ fail_fixed_max_beta_impossible <- function(non_max, alpha, K, p_max) {
 #' set to `p_max`, so the largest true proportion is fixed at the highest
 #' index. If the rescaled remainder contains any value `>= p_max`, the
 #' combination of `alpha`, `K`, and `p_max` is impossible for a strictly unique
-#' fixed maximum; the function warns and then fails.
+#' fixed maximum; the function warns and then fails. When `p_max` contains
+#' multiple values, this construction is applied independently per value.
 generate_proportions_fixed_max_beta <- function(alpha, K = 10, p_max,
                                                 grid = default_beta_grid(K - 1L)) {
   if (!is.numeric(alpha) || length(alpha) != 1L || !is.finite(alpha) || alpha <= 0) {
@@ -132,11 +135,23 @@ generate_proportions_fixed_max_beta <- function(alpha, K = 10, p_max,
   if (is.null(p_max)) {
     stop("p_max must be provided when method = 'fixed_max_beta'.", call. = FALSE)
   }
-  if (!is.numeric(p_max) || length(p_max) != 1L || !is.finite(p_max) || p_max <= 0 || p_max >= 1) {
-    stop("p_max must be a single number strictly between 0 and 1.", call. = FALSE)
+  if (!is.numeric(p_max) || any(!is.finite(p_max)) || any(p_max <= 0) || any(p_max >= 1)) {
+    stop("p_max must contain number(s) strictly between 0 and 1.", call. = FALSE)
   }
   if (length(grid) != K - 1L) {
     stop("grid must have length K - 1 for method = 'fixed_max_beta'.", call. = FALSE)
+  }
+  if (length(p_max) > 1L) {
+    p_mat <- t(vapply(
+      p_max,
+      function(p_max_i) {
+        generate_proportions_fixed_max_beta(alpha = alpha, K = K, p_max = p_max_i, grid = grid)
+      },
+      FUN.VALUE = numeric(K)
+    ))
+    colnames(p_mat) <- paste0("index_", seq_len(K))
+    rownames(p_mat) <- paste0("p_max_", format(p_max, trim = TRUE))
+    return(p_mat)
   }
 
   remainder_weights <- dbeta(grid, shape1 = alpha, shape2 = 1)
@@ -163,10 +178,13 @@ generate_proportions_fixed_max_beta <- function(alpha, K = 10, p_max,
 #' @param method  Proportion-generation method: `"beta"` or `"fixed_max_beta"`.
 #' @param p_max   Fixed largest true proportion for `"fixed_max_beta"`. The
 #'   largest value is always placed at the highest index and must remain
-#'   strictly unique; impossible combinations warn and fail.
+#'   strictly unique; impossible combinations warn and fail. May be a numeric
+#'   vector when calling the fixed-max generator directly.
 #' @param grid    Evaluation points in (0,1), length K (used by `"beta"`).
 #'
 #' @return Numeric vector of length K, all strictly positive, summing to 1.
+#'   For method `"fixed_max_beta"` with vector `p_max`, returns a numeric
+#'   matrix with one row per `p_max` value and K columns.
 generate_proportions <- function(alpha, K = 10,
                                  method = c("beta", "fixed_max_beta"),
                                  p_max = NULL,
