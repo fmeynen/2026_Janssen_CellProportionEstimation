@@ -360,6 +360,26 @@ pass("multi-p_max run skips impossible combinations and keeps feasible ones")
 # ---- 9. plotting helpers: p_max filters -------------------------------------
 cat("\n9. plotting helper filters\n")
 
+proportions_plot_beta <- plot_proportions_curve(res)
+if (!inherits(proportions_plot_beta, "ggplot")) stop("plot_proportions_curve should return a ggplot object for beta results")
+pass("plot_proportions_curve supports beta simulation results")
+
+proportions_plot_fixed <- plot_proportions_curve(res_fixed_method)
+if (!inherits(proportions_plot_fixed, "ggplot")) stop("plot_proportions_curve should return a ggplot object for fixed_max_beta results")
+pass("plot_proportions_curve supports fixed_max_beta simulation results")
+
+fixed_plot_build <- ggplot2::ggplot_build(proportions_plot_fixed)
+fixed_curve_x <- fixed_plot_build$data[[1]]$x
+fixed_point_x <- fixed_plot_build$data[[2]]$x
+comparison_tol <- 1e-12
+if (!any(abs(fixed_point_x - 1) < comparison_tol)) {
+  stop("fixed_max_beta plot should include the fixed-maximum point at x = 1")
+}
+if (any(abs(fixed_curve_x - 1) < comparison_tol)) {
+  stop("fixed_max_beta plot curve should exclude x = 1 so the fixed maximum is not on the curve")
+}
+pass("fixed_max_beta plot excludes the fixed maximum point from the curve")
+
 success_plot <- plot_success_rate_curve(
   res_multi_pmax,
   metric = "AE",
