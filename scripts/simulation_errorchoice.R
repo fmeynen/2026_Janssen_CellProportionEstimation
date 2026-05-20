@@ -33,7 +33,7 @@ simulation_errorchoice_defaults <- function() {
     model = "multinomial",
     tie_method = "random",
     proportion_method = "fixed_max_beta",
-    p_max = c(0.3,0.4, 0.5),
+    p_max = c(0.2, 0.3,0.4, 0.5),
     seed = 260926L
   )
 }
