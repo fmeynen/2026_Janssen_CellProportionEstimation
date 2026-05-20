@@ -46,16 +46,50 @@ p_dispatch <- generate_proportions(alpha = 2, K = 10, method = "beta")
 if (!identical(p, p_dispatch)) stop("beta dispatcher route should match generate_proportions_beta")
 pass("beta dispatcher route works and is backward-compatible")
 
-err_fixed_max <- tryCatch(
+err_missing_pmax <- tryCatch(
   generate_proportions(alpha = 2, K = 10, method = "fixed_max_beta"),
   error = function(e) e$message
 )
-if (!grepl("not yet implemented", err_fixed_max) ||
-    !grepl("emit a warning", err_fixed_max) ||
-    !grepl("stop with an error", err_fixed_max)) {
-  stop("fixed_max_beta placeholder should fail with a clear Phase 2 message")
+if (!grepl("p_max must be provided", err_missing_pmax)) {
+  stop("fixed_max_beta should require p_max")
 }
-pass("fixed_max_beta placeholder fails with clear message")
+pass("fixed_max_beta requires p_max")
+
+p_fixed <- generate_proportions(alpha = 2, K = 10, method = "fixed_max_beta", p_max = 0.4)
+if (abs(sum(p_fixed) - 1) > 1e-12) stop("fixed_max_beta proportions do not sum to 1")
+pass("fixed_max_beta proportions sum to 1")
+
+if (length(p_fixed) != 10L) stop("fixed_max_beta returned wrong length")
+pass("fixed_max_beta returns length K")
+
+if (abs(p_fixed[10] - 0.4) > 1e-12) stop("fixed_max_beta should place p_max at highest index")
+pass("fixed_max_beta fixes largest proportion at highest index")
+
+if (which.max(p_fixed) != 10L || sum(p_fixed == max(p_fixed)) != 1L) {
+  stop("fixed_max_beta should produce a strictly unique maximum at the highest index")
+}
+pass("fixed_max_beta maximum is strictly unique")
+
+warn_fixed_max <- NULL
+err_fixed_max <- tryCatch(
+  withCallingHandlers(
+    generate_proportions(alpha = 2, K = 2, method = "fixed_max_beta", p_max = 0.4),
+    warning = function(w) {
+      warn_fixed_max <<- conditionMessage(w)
+      invokeRestart("muffleWarning")
+    }
+  ),
+  error = function(e) e$message
+)
+if (is.null(warn_fixed_max) || !grepl("Impossible fixed_max_beta combination", warn_fixed_max)) {
+  stop("fixed_max_beta should warn on impossible alpha/K/p_max combinations")
+}
+pass("fixed_max_beta warns on impossible combinations")
+
+if (!grepl("not strictly unique", err_fixed_max)) {
+  stop("fixed_max_beta should fail after warning for impossible combinations")
+}
+pass("fixed_max_beta fails after warning on impossible combinations")
 
 # ---- 3. simulate_counts_multinomial ----------------------------------------
 cat("\n3. simulate_counts_multinomial\n")
@@ -242,16 +276,24 @@ pass("replicate_summaries row count correct")
 if (nrow(res$curves) != 3L * 2L) stop("curves has wrong row count")
 pass("curves row count correct")
 
-err_fixed_method <- tryCatch(
-  run_simulation_experiment(
-    alpha = 2, K = 10L, n = 100L, B = 5L,
-    taus = c(0.05, 0.10),
-    proportion_method = "fixed_max_beta"
-  ),
-  error = function(e) e$message
+res_fixed_method <- run_simulation_experiment(
+  alpha = 2, K = 10L, n = 100L, B = 5L,
+  taus = c(0.05, 0.10),
+  proportion_method = "fixed_max_beta",
+  p_max = 0.4,
+  seed = 9L
 )
-if (!grepl("not yet implemented", err_fixed_method)) stop("fixed_max_beta should fail in orchestration")
-pass("run_simulation_experiment routes proportion_method through dispatcher")
+if (!identical(res_fixed_method$inputs$proportion_method, "fixed_max_beta")) {
+  stop("fixed_max_beta should be selectable through run_simulation_experiment")
+}
+if (!identical(res_fixed_method$inputs$p_max, 0.4)) {
+  stop("run_simulation_experiment should record p_max in inputs")
+}
+fixed_row <- as.numeric(res_fixed_method$p_table[1, grep("^index_", names(res_fixed_method$p_table))])
+if (abs(fixed_row[length(fixed_row)] - 0.4) > 1e-12) {
+  stop("run_simulation_experiment should use fixed_max_beta proportions")
+}
+pass("run_simulation_experiment routes fixed_max_beta through dispatcher")
 
 # smoke test with named-list taus (different grid lengths per metric)
 set.seed(7L)
