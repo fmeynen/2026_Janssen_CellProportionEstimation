@@ -290,8 +290,9 @@ if (!identical(res_fixed_method$inputs$proportion_method, "fixed_max_beta")) {
 if (!identical(res_fixed_method$inputs$p_max, 0.4)) {
   stop("run_simulation_experiment should record p_max in inputs")
 }
-# Extract the proportions from the first simulation's index_* columns in p_table.
-simulated_proportions <- as.numeric(res_fixed_method$p_table[1, grep("^index_", names(res_fixed_method$p_table))])
+# Extract the proportions from the first simulation's index_1 ... index_K columns in p_table.
+proportion_columns <- paste0("index_", seq_len(res_fixed_method$inputs$K))
+simulated_proportions <- as.numeric(res_fixed_method$p_table[1, proportion_columns])
 if (abs(simulated_proportions[length(simulated_proportions)] - 0.4) > 1e-12) {
   stop("run_simulation_experiment should use fixed_max_beta proportions")
 }

@@ -149,7 +149,7 @@ generate_proportions_fixed_max_beta <- function(alpha, K = 10, p_max,
 
   p <- c(remainder, p_max)
   validate_proportions(p)
-  stopifnot(which.max(p) == K, sum(abs(p - p_max) < 1e-12) == 1L)
+  stopifnot(which.max(p) == K, max(p[-K]) < p_max)
   p
 }
 
