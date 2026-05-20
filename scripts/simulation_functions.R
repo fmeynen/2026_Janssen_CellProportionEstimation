@@ -29,6 +29,9 @@ normalize_to_simplex <- function(w) {
 }
 
 #' Default evaluation grid for Beta-based proportion generators.
+#'
+#' Returns a shared interior grid of the requested length. The fixed-max Beta
+#' generator reuses this helper with `K - 1` points for its non-max remainder.
 default_beta_grid <- function(K) {
   seq(0.05, 0.95, length.out = K)
 }
@@ -116,13 +119,21 @@ fail_fixed_max_beta_impossible <- function(non_max, alpha, K, p_max) {
 #' fixed maximum; the function warns and then fails.
 generate_proportions_fixed_max_beta <- function(alpha, K = 10, p_max,
                                                 grid = default_beta_grid(K - 1L)) {
-  stopifnot(is.numeric(alpha), length(alpha) == 1L, alpha > 0)
-  stopifnot(is.numeric(K), length(K) == 1L, K >= 2L)
+  if (!is.numeric(alpha) || length(alpha) != 1L || !is.finite(alpha) || alpha <= 0) {
+    stop("alpha must be a single positive number.", call. = FALSE)
+  }
+  if (!is.numeric(K) || length(K) != 1L || K < 2L) {
+    stop("K must be a single numeric value >= 2 for method = 'fixed_max_beta'.", call. = FALSE)
+  }
   if (is.null(p_max)) {
     stop("p_max must be provided when method = 'fixed_max_beta'.", call. = FALSE)
   }
-  stopifnot(is.numeric(p_max), length(p_max) == 1L, is.finite(p_max), p_max > 0, p_max < 1)
-  stopifnot(length(grid) == K - 1L)
+  if (!is.numeric(p_max) || length(p_max) != 1L || !is.finite(p_max) || p_max <= 0 || p_max >= 1) {
+    stop("p_max must be a single number strictly between 0 and 1.", call. = FALSE)
+  }
+  if (length(grid) != K - 1L) {
+    stop("grid must have length K - 1 for method = 'fixed_max_beta'.", call. = FALSE)
+  }
 
   remainder_weights <- dbeta(grid, shape1 = alpha, shape2 = 1)
   remainder <- (1 - p_max) * normalize_to_simplex(remainder_weights)
