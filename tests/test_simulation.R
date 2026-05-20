@@ -50,7 +50,9 @@ err_fixed_max <- tryCatch(
   generate_proportions(alpha = 2, K = 10, method = "fixed_max_beta"),
   error = function(e) e$message
 )
-if (!grepl("not yet implemented", err_fixed_max) || !grepl("warn and fail", err_fixed_max)) {
+if (!grepl("not yet implemented", err_fixed_max) ||
+    !grepl("emit a warning", err_fixed_max) ||
+    !grepl("stop with an error", err_fixed_max)) {
   stop("fixed_max_beta placeholder should fail with a clear Phase 2 message")
 }
 pass("fixed_max_beta placeholder fails with clear message")

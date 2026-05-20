@@ -85,7 +85,8 @@ generate_proportions <- function(alpha, K = 10,
         "Planned Phase 2 behavior: fix the largest true proportion at the highest index",
         "as a strictly unique maximum; construct a Beta-shaped remainder over K - 1",
         "components and scale it to sum to 1 - p_max; if any non-max component is >=",
-        "p_max for a given (alpha, K, p_max), warn and fail."
+        "p_max for a given (alpha, K, p_max), emit a warning with diagnostics",
+        "and then stop with an error (warn + fail)."
       )
     )
   )
