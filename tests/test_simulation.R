@@ -406,7 +406,9 @@ res_hist_grid <- run_simulation_experiment(
 )
 argmax_plot_grid <- plot_argmax_histogram(res_hist_grid, metric = "AE")
 layout_grid <- ggplot2::ggplot_build(argmax_plot_grid)$layout$layout
-if (length(unique(layout_grid$COL)) != 3L || length(unique(layout_grid$ROW)) != 2L) {
+expected_alpha_n <- length(unique(res_hist_grid$replicate_summaries$alpha))
+expected_p_max_n <- length(unique(res_hist_grid$replicate_summaries$p_max))
+if (length(unique(layout_grid$COL)) != expected_alpha_n || length(unique(layout_grid$ROW)) != expected_p_max_n) {
   stop("plot_argmax_histogram should facet with alpha in columns and p_max in rows")
 }
 pass("plot_argmax_histogram facets with alpha columns and p_max rows")

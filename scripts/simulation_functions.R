@@ -610,7 +610,9 @@ plot_argmax_histogram <- function(result, metric, alphas = NULL, p_maxs = NULL) 
     "result must contain replicate_summaries" = "replicate_summaries" %in% names(result)
   )
   df <- result$replicate_summaries
-  if (!is.character(metric) || length(metric) != 1L || is.na(metric) || !(metric %in% c("AE", "ARE"))) {
+  metric_is_scalar_character <- is.character(metric) && length(metric) == 1L && !is.na(metric)
+  metric_is_supported <- metric_is_scalar_character && metric %in% c("AE", "ARE")
+  if (!metric_is_supported) {
     stop("metric must be a single value: 'AE' or 'ARE'.", call. = FALSE)
   }
   if (!any(df$metric %in% metric)) {
