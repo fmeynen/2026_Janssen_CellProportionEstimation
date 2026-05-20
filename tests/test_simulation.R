@@ -335,7 +335,7 @@ if (!any(grepl("Impossible fixed_max_beta combination", warn_multi_pmax))) {
   stop("multi-p_max run should warn for impossible combinations")
 }
 pass("multi-p_max run warns for impossible combinations")
-if (!all(unique(res_multi_pmax$curves$p_max) == 0.8)) {
+if (!setequal(unique(res_multi_pmax$curves$p_max), 0.8)) {
   stop("multi-p_max run should skip impossible combinations and keep feasible p_max only")
 }
 pass("multi-p_max run skips impossible combinations and keeps feasible ones")

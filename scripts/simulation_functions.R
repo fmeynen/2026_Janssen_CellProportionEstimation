@@ -704,7 +704,8 @@ run_simulation_experiment <- function(alpha, K = 10, n, B, taus,
   curves_list <- vector("list", n_combinations)
   argmax_summary_list <- vector("list", n_combinations)
   keep <- logical(n_combinations)
-  is_multi_p_max_fixed <- identical(proportion_method, "fixed_max_beta") && length(p_max_values) > 1L
+  should_skip_impossible_combinations <- identical(proportion_method, "fixed_max_beta") &&
+    length(p_max_values) > 1L
 
   for (i in seq_len(n_combinations)) {
     alpha_i <- combinations$alpha[[i]]
@@ -723,7 +724,7 @@ run_simulation_experiment <- function(alpha, K = 10, n, B, taus,
           conditionMessage(e),
           fixed = TRUE
         )
-        if (is_multi_p_max_fixed && is_impossible_fixed_max) {
+        if (should_skip_impossible_combinations && is_impossible_fixed_max) {
           return(NULL)
         }
         stop(e)
