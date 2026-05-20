@@ -122,8 +122,8 @@ generate_proportions_fixed_max_beta <- function(alpha, K = 10, p_max,
   if (!is.numeric(alpha) || length(alpha) != 1L || !is.finite(alpha) || alpha <= 0) {
     stop("alpha must be a single positive number.", call. = FALSE)
   }
-  if (!is.numeric(K) || length(K) != 1L || K < 2L) {
-    stop("K must be a single numeric value >= 2 for method = 'fixed_max_beta'.", call. = FALSE)
+  if (!is.numeric(K) || length(K) != 1L || !is.finite(K) || K != as.integer(K) || K < 2L) {
+    stop("K must be a single integer >= 2 for method = 'fixed_max_beta'.", call. = FALSE)
   }
   if (is.null(p_max)) {
     stop("p_max must be provided when method = 'fixed_max_beta'.", call. = FALSE)
@@ -149,7 +149,7 @@ generate_proportions_fixed_max_beta <- function(alpha, K = 10, p_max,
 
   p <- c(remainder, p_max)
   validate_proportions(p)
-  stopifnot(which.max(p) == K, sum(p == p_max) == 1L)
+  stopifnot(which.max(p) == K, sum(abs(p - p_max) < 1e-12) == 1L)
   p
 }
 
