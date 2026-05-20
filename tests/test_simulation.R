@@ -39,8 +39,26 @@ p3 <- generate_proportions_beta(alpha = 5, K = 10)
 if (identical(p, p3)) stop("different alpha should yield different p")
 pass("different alpha -> different p")
 
-# ---- 2. simulate_counts_multinomial ----------------------------------------
-cat("\n2. simulate_counts_multinomial\n")
+# ---- 2. generate_proportions dispatcher ------------------------------------
+cat("\n2. generate_proportions dispatcher\n")
+
+p_dispatch <- generate_proportions(alpha = 2, K = 10, method = "beta")
+if (!identical(p, p_dispatch)) stop("beta dispatcher route should match generate_proportions_beta")
+pass("beta dispatcher route works and is backward-compatible")
+
+err_fixed_max <- tryCatch(
+  generate_proportions(alpha = 2, K = 10, method = "fixed_max_beta"),
+  error = function(e) e$message
+)
+if (!grepl("not yet implemented", err_fixed_max) ||
+    !grepl("emit a warning", err_fixed_max) ||
+    !grepl("stop with an error", err_fixed_max)) {
+  stop("fixed_max_beta placeholder should fail with a clear Phase 2 message")
+}
+pass("fixed_max_beta placeholder fails with clear message")
+
+# ---- 3. simulate_counts_multinomial ----------------------------------------
+cat("\n3. simulate_counts_multinomial\n")
 
 set.seed(1L)
 y <- simulate_counts_multinomial(p, n = 200L)
@@ -58,8 +76,8 @@ if (any(y < 0L)) stop("y contains negative counts")
 if (!is.integer(y)) stop("y is not integer")
 pass("nonneg integer counts")
 
-# ---- 3. simulate_counts dispatcher -----------------------------------------
-cat("\n3. simulate_counts dispatcher\n")
+# ---- 4. simulate_counts dispatcher -----------------------------------------
+cat("\n4. simulate_counts dispatcher\n")
 
 set.seed(1L)
 y2 <- simulate_counts(p, n = 200L, model = "multinomial")
@@ -81,8 +99,8 @@ err_ln <- tryCatch(
 if (!grepl("not yet implemented", err_ln)) stop("logistic_normal_multinomial should error")
 pass("logistic_normal_multinomial errors with clear message")
 
-# ---- 4. compute_errors ------------------------------------------------------
-cat("\n4. compute_errors\n")
+# ---- 5. compute_errors ------------------------------------------------------
+cat("\n5. compute_errors\n")
 
 # known example
 p_ex   <- c(0.5, 0.3, 0.2)
@@ -105,8 +123,8 @@ err_zero_prop <- tryCatch(
 if (!is.character(err_zero_prop)) stop("validate_proportions should reject zero proportions")
 pass("validate_proportions rejects zero proportions")
 
-# ---- 5. max_error_summary ---------------------------------------------------
-cat("\n5. max_error_summary\n")
+# ---- 6. max_error_summary ---------------------------------------------------
+cat("\n6. max_error_summary\n")
 
 ev <- c(0.1, 0.5, 0.5, 0.3)
 
@@ -134,8 +152,8 @@ s_unique <- max_error_summary(ev2, tie_method = "first")
 if (s_unique$argmax_index != 2L) stop("unique max should return index 2")
 pass("unique max handled correctly")
 
-# ---- 6. evaluate_thresholds -------------------------------------------------
-cat("\n6. evaluate_thresholds\n")
+# ---- 7. evaluate_thresholds -------------------------------------------------
+cat("\n7. evaluate_thresholds\n")
 
 # construct toy max_errors matrix
 me <- matrix(c(0.05, 0.15, 0.25,    # AE column
@@ -195,8 +213,8 @@ err_missing <- tryCatch(
 if (!grepl("ARE", err_missing)) stop("missing metric in taus list should error with metric name")
 pass("named-list taus: missing metric produces informative error")
 
-# ---- 7. run_simulation_experiment (smoke test) ------------------------------
-cat("\n7. run_simulation_experiment smoke test\n")
+# ---- 8. run_simulation_experiment (smoke test) ------------------------------
+cat("\n8. run_simulation_experiment smoke test\n")
 
 set.seed(7L)
 res <- run_simulation_experiment(
@@ -206,18 +224,34 @@ res <- run_simulation_experiment(
   seed = 7L
 )
 
-expected_fields <- c("inputs", "p", "max_errors", "argmax", "curves", "argmax_summary")
+expected_fields <- c("inputs", "p_table", "replicate_summaries", "errors_long", "curves", "argmax_summary")
 if (!all(expected_fields %in% names(res))) stop("result missing expected fields")
 pass("result has all expected fields")
 
-if (abs(sum(res$p) - 1) > 1e-12) stop("res$p does not sum to 1")
-pass("res$p sums to 1")
+if (!identical(res$inputs$proportion_method, "beta")) stop("default proportion_method should be beta")
+pass("default proportion_method is beta")
 
-if (!all(dim(res$max_errors) == c(50L, 2L))) stop("max_errors wrong dimensions")
-pass("max_errors dimensions correct")
+if (abs(sum(as.numeric(res$p_table[1, grep("^index_", names(res$p_table))])) - 1) > 1e-12) {
+  stop("p_table first row does not sum to 1")
+}
+pass("p_table rows encode valid proportions")
+
+if (nrow(res$replicate_summaries) != 50L * 2L) stop("replicate_summaries wrong row count")
+pass("replicate_summaries row count correct")
 
 if (nrow(res$curves) != 3L * 2L) stop("curves has wrong row count")
 pass("curves row count correct")
+
+err_fixed_method <- tryCatch(
+  run_simulation_experiment(
+    alpha = 2, K = 10L, n = 100L, B = 5L,
+    taus = c(0.05, 0.10),
+    proportion_method = "fixed_max_beta"
+  ),
+  error = function(e) e$message
+)
+if (!grepl("not yet implemented", err_fixed_method)) stop("fixed_max_beta should fail in orchestration")
+pass("run_simulation_experiment routes proportion_method through dispatcher")
 
 # smoke test with named-list taus (different grid lengths per metric)
 set.seed(7L)
