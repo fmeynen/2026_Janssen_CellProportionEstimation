@@ -382,7 +382,7 @@ err_plot_missing_metric <- tryCatch(
   plot_argmax_histogram(res_multi_pmax),
   error = function(e) e$message
 )
-if (!grepl("metric must be a single value", err_plot_missing_metric)) {
+if (!identical(err_plot_missing_metric, "metric must be a single value: 'AE' or 'ARE'.")) {
   stop("plot_argmax_histogram should require a valid metric")
 }
 pass("plot_argmax_histogram requires metric")
