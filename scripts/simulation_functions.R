@@ -285,6 +285,12 @@ compute_errors <- function(phat, p, metrics = c("AE", "ARE")) {
   if ("ARE" %in% metrics) {
     result[["ARE"]] <- abs(phat - p) / p   # NaN when p == 0 and phat == 0; Inf when p == 0 and phat != 0; no stabilisation by design
   }
+  if("ATE" %in% metrics){
+    result[["ATE"]] <- abs(asin(sqrt(p_hat)) - asin(sqrt(p)))
+  }
+  if("LAE" %in% metrics){
+    result[["LAE"]] <- log(abs(diff))
+  }
   result
 }
 
