@@ -7,14 +7,14 @@ source(here::here("scripts", "simulation_functions.R"))
 
 simulation_hybrid_heatmap_defaults <- function() {
   list(
-    alpha = c(1, 2, 5),
+    alpha = c(2, 2.5, 3, 4, 5),
     K = 10L,
     n = 1000L,
-    B = 200L,
+    B = 500L,
     cutoffs = seq(0, 0.5, by = 0.01),
-    tau_AE_values = c(0.1, 0.2, 0.3, 0.4, 0.5),
-    tau_ARE_values = c(0.25, 0.5, 0.75, 1.0, 1.25),
-    maximize = "cell",
+    tau_AE_values = c(0.01, 0.02, 0.03, 0.04, 0.05),
+    tau_ARE_values = c(0.2, 0.4, 0.6, 0.8, 1.0, 1.2),
+    maximize = "replicate",
     seed = 260926L
   )
 }
