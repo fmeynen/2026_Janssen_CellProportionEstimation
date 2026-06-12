@@ -24,7 +24,7 @@ simulation_errorchoice_defaults <- function() {
   taus_AE <- exp(seq(0, log(1 + 0.02), by = 0.0005)) - 1
   taus_ARE <- 10^seq(0, log10(1 + 1.5), by = 0.0005) - 1
   taus_ATE <- 10^seq(0, log10(1 + 1.5), by = 0.0005) - 1
-  taus_LAE <- 10^seq(0, log10(1 + 1.5), by = 0.0005) - 1
+  taus_LAE <- seq(-10, 0, by = 0.05)
   list(
     alpha = c(2, 2.5, 3, 4, 5),
     K = 10L,
