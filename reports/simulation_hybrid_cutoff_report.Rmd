@@ -1,0 +1,118 @@
+---
+title: "Simulation Hybrid Cutoff Heatmaps Report"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    toc: false
+    number_sections: true
+    extra_dependencies: ["float"]
+params:
+  alpha:
+    value: [2, 2.5, 3, 4, 5]
+  K: 10
+  n: 1000
+  B: 500
+  cutoffs_by: 0.01
+  tau_AE_values:
+    value: [0.01, 0.02, 0.03, 0.04, 0.05]
+  tau_ARE_values:
+    value: [0.2, 0.4, 0.6, 0.8, 1.0, 1.2]
+  maximize: "replicate"
+  seed: 260926
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, fig.width = 7, fig.height = 4)
+knitr::opts_chunk$set(fig.pos = "H")
+
+knitr::opts_knit$set(root.dir = here::here())
+source(here::here("scripts", "simulation_functions.R"))
+source(here::here("scripts", "simulation_hybrid_cutoff_heatmaps.R"))
+```
+
+# Overview
+
+This report shows hybrid AE/ARE cutoff heatmaps for each of the five \(\alpha\) values.
+
+For a given pair of thresholds (\(\tau_{AE}\), \(\tau_{ARE}\)), the best hybrid cutoff \(c^*\) is the value of \(c\) that maximises the `r params$maximize`-level success rate under the rule: use AE when \(\hat{p} \leq c\), otherwise use ARE.
+
+The simulation uses the following settings:
+
+```{r configuration}
+config <- list(
+  alpha          = as.numeric(params$alpha),
+  K              = as.integer(params$K),
+  n              = as.integer(params$n),
+  B              = as.integer(params$B),
+  cutoffs        = seq(0, 0.5, by = params$cutoffs_by),
+  tau_AE_values  = as.numeric(params$tau_AE_values),
+  tau_ARE_values = as.numeric(params$tau_ARE_values),
+  maximize       = params$maximize,
+  seed           = as.integer(params$seed)
+)
+
+setup_table <- data.frame(
+  Parameter = c("alpha", "K", "n", "B", "cutoffs", "tau_AE values", "tau_ARE values",
+                "maximize", "seed"),
+  Value = c(
+    paste(config$alpha, collapse = ", "),
+    config$K,
+    config$n,
+    config$B,
+    paste0("seq(0, 0.5, by = ", params$cutoffs_by, ")"),
+    paste(config$tau_AE_values, collapse = ", "),
+    paste(config$tau_ARE_values, collapse = ", "),
+    config$maximize,
+    config$seed
+  ),
+  stringsAsFactors = FALSE
+)
+
+knitr::kable(
+  setup_table,
+  caption = "Simulation configuration used in this report.",
+  booktabs = TRUE
+)
+```
+
+```{r run-simulation}
+result <- run_simulation_hybrid_heatmaps(config)
+```
+
+\newpage
+
+# True proportions
+
+The true proportions for each \(\alpha\) are shown below. Proportions are derived from the weighted Beta(\(\alpha\), 1) quantile grid.
+
+```{r proportion-table}
+p_tab <- round(result$p_table, digits = 5)
+p_tab <- p_tab[, !names(p_tab) %in% "p_max", drop = FALSE]
+knitr::kable(p_tab, caption = "True proportion values by alpha and cell-type index.")
+```
+
+\newpage
+
+# Hybrid cutoff heatmaps
+
+Each heatmap shows, for a grid of (\(\tau_{AE}\), \(\tau_{ARE}\)) threshold pairs, the best hybrid cutoff \(c^*\). Cell labels give the cutoff value; colour intensity indicates magnitude.
+
+```{r heatmap-alpha-1, fig.cap=paste0("Best hybrid cutoff heatmap for alpha = ", config$alpha[1], ".")}
+print(result$heatmaps[[1]])
+```
+
+```{r heatmap-alpha-2, fig.cap=paste0("Best hybrid cutoff heatmap for alpha = ", config$alpha[2], ".")}
+print(result$heatmaps[[2]])
+```
+
+```{r heatmap-alpha-3, fig.cap=paste0("Best hybrid cutoff heatmap for alpha = ", config$alpha[3], ".")}
+print(result$heatmaps[[3]])
+```
+
+```{r heatmap-alpha-4, fig.cap=paste0("Best hybrid cutoff heatmap for alpha = ", config$alpha[4], ".")}
+print(result$heatmaps[[4]])
+```
+
+```{r heatmap-alpha-5, fig.cap=paste0("Best hybrid cutoff heatmap for alpha = ", config$alpha[5], ".")}
+print(result$heatmaps[[5]])
+```
