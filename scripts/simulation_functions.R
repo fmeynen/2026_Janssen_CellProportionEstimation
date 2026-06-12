@@ -276,7 +276,7 @@ counts_to_proportions <- function(y, n = sum(y)) {
 #' @details
 #' AE  = abs(phat - p)
 #' ARE = abs(phat - p) / p  (no epsilon stabilisation; NaN/Inf for p == 0 is expected)
-compute_errors <- function(phat, p, metrics = c("AE", "ARE")) {
+compute_errors <- function(phat, p, metrics = c("AE", "ARE"), n) {
   stopifnot(length(phat) == length(p))
   result <- list()
   if ("AE" %in% metrics) {
@@ -285,11 +285,11 @@ compute_errors <- function(phat, p, metrics = c("AE", "ARE")) {
   if ("ARE" %in% metrics) {
     result[["ARE"]] <- abs(phat - p) / p   # NaN when p == 0 and phat == 0; Inf when p == 0 and phat != 0; no stabilisation by design
   }
-  if("ATE" %in% metrics){
-    result[["ATE"]] <- abs(asin(sqrt(p_hat)) - asin(sqrt(p)))
+  if("TSE" %in% metrics){
+    result[["ATE"]] <- asinh(sqrt(2*n^2(phat-p)^2))
   }
   if("LAE" %in% metrics){
-    result[["LAE"]] <- log(abs(diff))
+    result[["LAE"]] <- log(abs(phat-p))
   }
   result
 }
@@ -367,7 +367,7 @@ run_replicates <- function(p, n, B,
     y_b      <- simulate_counts(p, n, model = model, ...)
     phat_b   <- counts_to_proportions(y_b, n)
     phat[b, ] <- phat_b
-    errors_b <- compute_errors(phat_b, p, metrics = metrics)
+    errors_b <- compute_errors(phat_b, p, metrics = metrics, n=n)
 
     for (m in metrics) {
       s <- max_error_summary(errors_b[[m]], tie_method = tie_method)
