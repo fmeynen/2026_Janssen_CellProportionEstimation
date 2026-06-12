@@ -343,6 +343,7 @@ max_error_summary <- function(error_vec, tie_method = c("random", "first", "last
 #'     \item{max_errors}{B x M numeric matrix of max error values.}
 #'     \item{argmax}{B x M integer matrix of argmax indices.}
 #'     \item{errors}{B x K x M numeric array of per-cell-type errors.}
+#'     \item{phat}{B x K numeric matrix of observed proportions.}
 #'     \item{inputs}{Copy of all input arguments (including seed used).}
 #'   }
 run_replicates <- function(p, n, B,
@@ -360,10 +361,12 @@ run_replicates <- function(p, n, B,
                        dimnames = list(NULL, metrics))
   errors     <- array(NA_real_, dim = c(B, K, length(metrics)),
                       dimnames = list(NULL, seq_len(K), metrics))
+  phat       <- matrix(NA_real_, nrow = B, ncol = K)
 
   for (b in seq_len(B)) {
     y_b      <- simulate_counts(p, n, model = model, ...)
     phat_b   <- counts_to_proportions(y_b, n)
+    phat[b, ] <- phat_b
     errors_b <- compute_errors(phat_b, p, metrics = metrics)
 
     for (m in metrics) {
@@ -378,6 +381,7 @@ run_replicates <- function(p, n, B,
     max_errors = max_errors,
     argmax     = argmax,
     errors     = errors,
+    phat       = phat,
     inputs     = list(p = p, n = n, B = B, metrics = metrics,
                       model = model, tie_method = tie_method, seed = seed)
   )
@@ -751,6 +755,8 @@ plot_argmax_histogram <- function(result, metric, alphas = NULL, p_maxs = NULL) 
 #'       alpha, p_max, replicate, metric, max_error, argmax_index.}
 #'     \item{errors_long}{Tidy data.frame:
 #'       alpha, p_max, replicate, metric, index, error.}
+#'     \item{phat_long}{Tidy data.frame:
+#'       alpha, p_max, replicate, index, phat.}
 #'     \item{curves}{Tidy data.frame:
 #'       alpha, p_max, metric, tau, success_rate, mean_n_above.}
 #'     \item{argmax_summary}{Tidy data.frame:
@@ -787,6 +793,7 @@ run_simulation_experiment <- function(alpha, K = 10, n, B, taus,
   p_table_list <- vector("list", n_combinations)
   replicate_summaries_list <- vector("list", n_combinations)
   errors_long_list <- vector("list", n_combinations)
+  phat_long_list <- vector("list", n_combinations)
   curves_list <- vector("list", n_combinations)
   argmax_summary_list <- vector("list", n_combinations)
   keep <- logical(n_combinations)
@@ -854,6 +861,15 @@ run_simulation_experiment <- function(alpha, K = 10, n, B, taus,
     }
     errors_long_list[[i]] <- do.call(rbind, errors_m_list)
 
+    phat_long_list[[i]] <- data.frame(
+      alpha = alpha_i,
+      p_max = p_max_i,
+      replicate = rep(seq_len(B), times = ncol(rep_out$phat)),
+      index = rep(seq_len(ncol(rep_out$phat)), each = B),
+      phat = as.vector(rep_out$phat),
+      stringsAsFactors = FALSE
+    )
+
     curves_i <- evaluate_thresholds(rep_out$max_errors, taus, errors = rep_out$errors)
     curves_i$alpha <- alpha_i
     curves_i$p_max <- p_max_i
@@ -872,6 +888,7 @@ run_simulation_experiment <- function(alpha, K = 10, n, B, taus,
   p_table_list <- p_table_list[keep]
   replicate_summaries_list <- replicate_summaries_list[keep]
   errors_long_list <- errors_long_list[keep]
+  phat_long_list <- phat_long_list[keep]
   curves_list <- curves_list[keep]
   argmax_summary_list <- argmax_summary_list[keep]
 
@@ -884,7 +901,417 @@ run_simulation_experiment <- function(alpha, K = 10, n, B, taus,
     p_table = do.call(rbind, p_table_list),
     replicate_summaries = do.call(rbind, replicate_summaries_list),
     errors_long = do.call(rbind, errors_long_list),
+    phat_long = do.call(rbind, phat_long_list),
     curves = do.call(rbind, curves_list),
     argmax_summary = do.call(rbind, argmax_summary_list)
   )
+}
+
+
+# ---- J) Hybrid cutoff evaluation --------------------------------------------
+
+#' Evaluate hybrid AE/ARE success at the cell-type level for one cutoff.
+#'
+#' @param phat_mat B x K numeric matrix of observed proportions.
+#' @param p        True proportion vector of length K.
+#' @param cutoff   Numeric scalar cutoff on observed proportions.
+#' @param tau_AE   Numeric scalar AE success threshold.
+#' @param tau_ARE  Numeric scalar ARE success threshold.
+#'
+#' @return List with elements:
+#'   \describe{
+#'     \item{success_matrix}{B x K logical matrix of hybrid success indicators.}
+#'     \item{use_AE_matrix}{B x K logical matrix; TRUE when AE is selected.}
+#'     \item{success_rate_cell}{Mean success across all replicate-index pairs.}
+#'     \item{success_rate_replicate}{Fraction of replicates where all K indices succeed.}
+#'   }
+evaluate_hybrid_success_cell_level <- function(phat_mat, p, cutoff, tau_AE, tau_ARE) {
+  stopifnot(
+    is.matrix(phat_mat),
+    is.numeric(phat_mat),
+    is.numeric(p),
+    length(p) == ncol(phat_mat),
+    all(is.finite(p)),
+    all(p > 0),
+    is.numeric(cutoff),
+    length(cutoff) == 1L,
+    is.finite(cutoff),
+    is.numeric(tau_AE),
+    length(tau_AE) == 1L,
+    is.finite(tau_AE),
+    is.numeric(tau_ARE),
+    length(tau_ARE) == 1L,
+    is.finite(tau_ARE)
+  )
+
+  p_mat <- matrix(p, nrow = nrow(phat_mat), ncol = ncol(phat_mat), byrow = TRUE)
+  ae_mat <- abs(phat_mat - p_mat)
+  are_mat <- ae_mat / p_mat
+  use_AE_matrix <- phat_mat <= cutoff
+  success_matrix <- ifelse(use_AE_matrix, ae_mat <= tau_AE, are_mat <= tau_ARE)
+
+  list(
+    success_matrix = success_matrix,
+    use_AE_matrix = use_AE_matrix,
+    success_rate_cell = mean(success_matrix, na.rm = TRUE),
+    success_rate_replicate = mean(rowSums(success_matrix, na.rm = TRUE) == ncol(success_matrix))
+  )
+}
+
+#' Sweep hybrid AE/ARE cutoffs and summarize success rates.
+#'
+#' @param phat_mat B x K numeric matrix of observed proportions.
+#' @param p        True proportion vector of length K.
+#' @param cutoffs  Numeric vector of candidate cutoffs.
+#' @param tau_AE   Numeric scalar AE success threshold.
+#' @param tau_ARE  Numeric scalar ARE success threshold.
+#'
+#' @return Tidy data.frame with one row per cutoff and columns:
+#'   cutoff, success_rate_cell, success_rate_replicate,
+#'   prop_using_AE, prop_using_ARE.
+sweep_hybrid_cutoffs_cell_level <- function(phat_mat, p, cutoffs, tau_AE, tau_ARE) {
+  stopifnot(is.numeric(cutoffs), length(cutoffs) >= 1L, all(is.finite(cutoffs)))
+
+  rows <- lapply(cutoffs, function(cutoff_i) {
+    eval_i <- evaluate_hybrid_success_cell_level(
+      phat_mat = phat_mat,
+      p = p,
+      cutoff = cutoff_i,
+      tau_AE = tau_AE,
+      tau_ARE = tau_ARE
+    )
+    prop_using_AE_i <- mean(eval_i$use_AE_matrix, na.rm = TRUE)
+    data.frame(
+      cutoff = cutoff_i,
+      success_rate_cell = eval_i$success_rate_cell,
+      success_rate_replicate = eval_i$success_rate_replicate,
+      prop_using_AE = prop_using_AE_i,
+      prop_using_ARE = 1 - prop_using_AE_i,
+      stringsAsFactors = FALSE
+    )
+  })
+
+  do.call(rbind, rows)
+}
+
+#' Find the best hybrid cutoff from a sweep curve.
+#'
+#' @param curve_df  Data.frame returned by `sweep_hybrid_cutoffs_cell_level()`.
+#' @param maximize  Which success rate to maximize: `"cell"` or `"replicate"`.
+#' @param tie_break Tie-breaker among maximizing cutoffs:
+#'   `"smallest"`, `"largest"`, or `"median"`.
+#'
+#' @return List with elements:
+#'   best_cutoff, best_success_rate_cell, best_success_rate_replicate,
+#'   best_prop_using_AE, n_tied_maximizers.
+find_best_hybrid_cutoff <- function(curve_df,
+                                    maximize = c("cell", "replicate"),
+                                    tie_break = c("smallest", "largest", "median")) {
+  maximize <- match.arg(maximize)
+  tie_break <- match.arg(tie_break)
+
+  required_cols <- c(
+    "cutoff", "success_rate_cell", "success_rate_replicate",
+    "prop_using_AE", "prop_using_ARE"
+  )
+  if (!all(required_cols %in% names(curve_df))) {
+    stop(
+      sprintf(
+        "curve_df must contain columns: %s",
+        paste(required_cols, collapse = ", ")
+      ),
+      call. = FALSE
+    )
+  }
+  if (nrow(curve_df) == 0L) {
+    stop("curve_df must contain at least one row.", call. = FALSE)
+  }
+
+  target_col <- if (identical(maximize, "cell")) "success_rate_cell" else "success_rate_replicate"
+  target_values <- curve_df[[target_col]]
+  best_value <- max(target_values, na.rm = TRUE)
+  tied_idx <- which(target_values == best_value)
+  tied_cutoffs <- curve_df$cutoff[tied_idx]
+
+  best_cutoff <- switch(
+    tie_break,
+    smallest = min(tied_cutoffs, na.rm = TRUE),
+    largest = max(tied_cutoffs, na.rm = TRUE),
+    median = stats::median(tied_cutoffs, na.rm = TRUE)
+  )
+
+  chosen_row <- curve_df[curve_df$cutoff == best_cutoff, , drop = FALSE][1L, , drop = FALSE]
+
+  list(
+    best_cutoff = best_cutoff,
+    best_success_rate_cell = chosen_row$success_rate_cell[[1L]],
+    best_success_rate_replicate = chosen_row$success_rate_replicate[[1L]],
+    best_prop_using_AE = chosen_row$prop_using_AE[[1L]],
+    n_tied_maximizers = length(tied_idx)
+  )
+}
+
+#' Run hybrid cutoff analysis for one simulation scenario.
+#'
+#' @param phat_mat  B x K numeric matrix of observed proportions.
+#' @param p         True proportion vector of length K.
+#' @param cutoffs   Numeric vector of candidate cutoffs.
+#' @param tau_AE    Numeric scalar AE success threshold.
+#' @param tau_ARE   Numeric scalar ARE success threshold.
+#' @param maximize  Which success rate to maximize: `"cell"` or `"replicate"`.
+#' @param alpha     Optional scalar metadata carried into outputs.
+#' @param p_max     Optional scalar metadata carried into outputs.
+#'
+#' @return List with two elements:
+#'   \describe{
+#'     \item{cutoff_curve}{Data.frame from `sweep_hybrid_cutoffs_cell_level()`.}
+#'     \item{best_summary}{One-row data.frame with the selected best cutoff summary.}
+#'   }
+run_hybrid_cutoff_analysis <- function(phat_mat, p, cutoffs, tau_AE, tau_ARE,
+                                       maximize = c("cell", "replicate"),
+                                       alpha = NULL, p_max = NULL) {
+  maximize <- match.arg(maximize)
+  cutoff_curve <- sweep_hybrid_cutoffs_cell_level(
+    phat_mat = phat_mat,
+    p = p,
+    cutoffs = cutoffs,
+    tau_AE = tau_AE,
+    tau_ARE = tau_ARE
+  )
+  best <- find_best_hybrid_cutoff(
+    curve_df = cutoff_curve,
+    maximize = maximize,
+    tie_break = "smallest"
+  )
+
+  best_summary <- data.frame(
+    alpha = if (is.null(alpha)) NA_real_ else alpha,
+    p_max = if (is.null(p_max)) NA_real_ else p_max,
+    maximize = maximize,
+    tau_AE = tau_AE,
+    tau_ARE = tau_ARE,
+    best_cutoff = best$best_cutoff,
+    best_success_rate_cell = best$best_success_rate_cell,
+    best_success_rate_replicate = best$best_success_rate_replicate,
+    best_prop_using_AE = best$best_prop_using_AE,
+    n_tied_maximizers = best$n_tied_maximizers,
+    stringsAsFactors = FALSE
+  )
+
+  list(
+    cutoff_curve = cutoff_curve,
+    best_summary = best_summary
+  )
+}
+
+#' Run simulation and hybrid cutoff analysis across all alpha/p_max scenarios.
+#'
+#' @param alpha             Numeric vector of positive Beta shape values.
+#' @param K                 Number of cell types.
+#' @param n                 Total sample size per replicate.
+#' @param B                 Number of replicates.
+#' @param cutoffs           Numeric vector of candidate cutoffs.
+#' @param tau_AE            Numeric scalar AE success threshold.
+#' @param tau_ARE           Numeric scalar ARE success threshold.
+#' @param proportion_method Proportion-generation method (`"beta"` or
+#'   `"fixed_max_beta"`).
+#' @param p_max             Optional fixed largest true proportion(s).
+#' @param model             Sampling model passed to `run_simulation_experiment()`.
+#' @param tie_method        Tie-breaking rule for max-error argmax.
+#' @param maximize          Which success rate to maximize (`"cell"` or
+#'   `"replicate"`).
+#' @param seed              Optional integer seed for reproducibility.
+#' @param ...               Additional arguments forwarded to
+#'   `run_simulation_experiment()`.
+#'
+#' @return List with elements:
+#'   \describe{
+#'     \item{inputs}{Copy of all function inputs.}
+#'     \item{p_table}{Scenario-level true proportions table.}
+#'     \item{phat_long}{Tidy replicate-level observed proportions.}
+#'     \item{cutoff_curves}{Combined hybrid cutoff curves across scenarios.}
+#'     \item{best_cutoff_summary}{One-row-per-scenario best-cutoff summary.}
+#'   }
+run_simulation_hybrid_cutoff_experiment <- function(alpha, K, n, B, cutoffs,
+                                                     tau_AE, tau_ARE,
+                                                     proportion_method = "beta",
+                                                     p_max = NULL,
+                                                     model = "multinomial",
+                                                     tie_method = "random",
+                                                     maximize = c("cell", "replicate"),
+                                                     seed = NULL, ...) {
+  maximize <- match.arg(maximize)
+  sim_out <- run_simulation_experiment(
+    alpha = alpha,
+    K = K,
+    n = n,
+    B = B,
+    taus = list(AE = tau_AE, ARE = tau_ARE),
+    metrics = c("AE", "ARE"),
+    proportion_method = proportion_method,
+    p_max = p_max,
+    model = model,
+    tie_method = tie_method,
+    seed = seed,
+    ...
+  )
+
+  p_table <- sim_out$p_table
+  index_cols <- grep("^index_", names(p_table), value = TRUE)
+  cutoff_curves_list <- vector("list", nrow(p_table))
+  best_summary_list <- vector("list", nrow(p_table))
+
+  for (i in seq_len(nrow(p_table))) {
+    alpha_i <- p_table$alpha[[i]]
+    p_max_i <- if ("p_max" %in% names(p_table)) p_table$p_max[[i]] else NA_real_
+    p_i <- as.numeric(p_table[i, index_cols, drop = FALSE])
+
+    same_p_max <- if (is.na(p_max_i)) {
+      is.na(sim_out$phat_long$p_max)
+    } else {
+      sim_out$phat_long$p_max == p_max_i
+    }
+    phat_subset <- sim_out$phat_long[
+      sim_out$phat_long$alpha == alpha_i & same_p_max,
+      c("replicate", "index", "phat"),
+      drop = FALSE
+    ]
+    phat_subset <- phat_subset[order(phat_subset$index, phat_subset$replicate), , drop = FALSE]
+    phat_mat_i <- matrix(phat_subset$phat, nrow = B, ncol = length(p_i))
+
+    hybrid_i <- run_hybrid_cutoff_analysis(
+      phat_mat = phat_mat_i,
+      p = p_i,
+      cutoffs = cutoffs,
+      tau_AE = tau_AE,
+      tau_ARE = tau_ARE,
+      maximize = maximize,
+      alpha = alpha_i,
+      p_max = p_max_i
+    )
+
+    curve_i <- hybrid_i$cutoff_curve
+    curve_i$alpha <- alpha_i
+    curve_i$p_max <- p_max_i
+    curve_i$tau_AE <- tau_AE
+    curve_i$tau_ARE <- tau_ARE
+    cutoff_curves_list[[i]] <- curve_i[, c(
+      "alpha", "p_max", "cutoff", "tau_AE", "tau_ARE",
+      "success_rate_cell", "success_rate_replicate",
+      "prop_using_AE", "prop_using_ARE"
+    )]
+
+    best_summary_list[[i]] <- hybrid_i$best_summary
+  }
+
+  list(
+    inputs = list(
+      alpha = alpha, K = K, n = n, B = B, cutoffs = cutoffs,
+      tau_AE = tau_AE, tau_ARE = tau_ARE,
+      proportion_method = proportion_method, p_max = p_max,
+      model = model, tie_method = tie_method, maximize = maximize, seed = seed
+    ),
+    p_table = sim_out$p_table,
+    phat_long = sim_out$phat_long,
+    cutoff_curves = do.call(rbind, cutoff_curves_list),
+    best_cutoff_summary = do.call(rbind, best_summary_list)
+  )
+}
+
+
+# ---- K) Hybrid-cutoff visualisation -----------------------------------------
+
+#' Plot a heatmap of best hybrid cutoffs across AE/ARE threshold pairs.
+#'
+#' @param phat_mat       B x K numeric matrix of observed proportions (B
+#'   replicates by K cell types).
+#' @param p              True proportion vector of length K.
+#' @param cutoffs        Numeric vector of candidate cutoffs.
+#' @param tau_AE_values  Numeric vector of AE thresholds for heatmap rows.
+#' @param tau_ARE_values Numeric vector of ARE thresholds for heatmap columns.
+#' @param maximize       Which success rate to maximize (`"cell"` or
+#'   `"replicate"`).
+#' @param tie_break      Tie-breaker among maximizing cutoffs:
+#'   `"smallest"`, `"largest"`, or `"median"`.
+#' @param label_digits   Number of digits displayed in cell labels.
+#'
+#' @return A ggplot heatmap object with fill and text labels equal to the
+#'   selected best cutoff for each (tau_AE, tau_ARE) pair.
+plot_hybrid_best_cutoff_heatmap <- function(phat_mat, p, cutoffs,
+                                            tau_AE_values, tau_ARE_values,
+                                            maximize = c("cell", "replicate"),
+                                            tie_break = c("smallest", "largest", "median"),
+                                            label_digits = 3L) {
+  maximize <- match.arg(maximize)
+  tie_break <- match.arg(tie_break)
+
+  stopifnot(
+    is.matrix(phat_mat),
+    is.numeric(p),
+    length(p) == ncol(phat_mat),
+    is.numeric(cutoffs),
+    length(cutoffs) >= 1L,
+    all(is.finite(cutoffs)),
+    is.numeric(tau_AE_values),
+    length(tau_AE_values) >= 1L,
+    all(is.finite(tau_AE_values)),
+    is.numeric(tau_ARE_values),
+    length(tau_ARE_values) >= 1L,
+    all(is.finite(tau_ARE_values)),
+    is.numeric(label_digits),
+    length(label_digits) == 1L,
+    is.finite(label_digits),
+    label_digits %% 1 == 0,
+    label_digits >= 0
+  )
+
+  threshold_grid <- expand.grid(
+    tau_AE = tau_AE_values,
+    tau_ARE = tau_ARE_values,
+    KEEP.OUT.ATTRS = FALSE,
+    stringsAsFactors = FALSE
+  )
+
+  rows <- lapply(seq_len(nrow(threshold_grid)), function(i) {
+    tau_AE_i <- threshold_grid$tau_AE[[i]]
+    tau_ARE_i <- threshold_grid$tau_ARE[[i]]
+    curve_i <- sweep_hybrid_cutoffs_cell_level(
+      phat_mat = phat_mat,
+      p = p,
+      cutoffs = cutoffs,
+      tau_AE = tau_AE_i,
+      tau_ARE = tau_ARE_i
+    )
+    best_i <- find_best_hybrid_cutoff(
+      curve_df = curve_i,
+      maximize = maximize,
+      tie_break = tie_break
+    )
+    data.frame(
+      tau_AE = tau_AE_i,
+      tau_ARE = tau_ARE_i,
+      best_cutoff = best_i$best_cutoff,
+      stringsAsFactors = FALSE
+    )
+  })
+
+  heatmap_df <- do.call(rbind, rows)
+  heatmap_df$tau_AE <- factor(heatmap_df$tau_AE, levels = sort(tau_AE_values, decreasing = TRUE))
+  heatmap_df$tau_ARE <- factor(heatmap_df$tau_ARE, levels = sort(tau_ARE_values))
+  heatmap_df$label <- formatC(heatmap_df$best_cutoff, digits = label_digits, format = "f")
+
+  ggplot2::ggplot(
+    heatmap_df,
+    ggplot2::aes(x = tau_ARE, y = tau_AE, fill = best_cutoff)
+  ) +
+    ggplot2::geom_tile(color = "white", linewidth = 0.4) +
+    ggplot2::geom_text(ggplot2::aes(label = label), size = 3) +
+    ggplot2::scale_fill_gradient(low = "#F7FBFF", high = "#08306B") +
+    ggplot2::labs(
+      x = "ARE threshold (tau_ARE)",
+      y = "AE threshold (tau_AE)",
+      fill = "Best cutoff",
+      title = "Best hybrid cutoff heatmap"
+    ) +
+    ggplot2::theme_bw()
 }
