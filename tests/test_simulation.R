@@ -276,7 +276,7 @@ res <- run_simulation_experiment(
   seed = 7L
 )
 
-expected_fields <- c("inputs", "p_table", "replicate_summaries", "errors_long", "curves", "argmax_summary")
+expected_fields <- c("inputs", "p_table", "replicate_summaries", "errors_long", "phat_long", "curves", "argmax_summary")
 if (!all(expected_fields %in% names(res))) stop("result missing expected fields")
 pass("result has all expected fields")
 
@@ -290,6 +290,12 @@ pass("p_table rows encode valid proportions")
 
 if (nrow(res$replicate_summaries) != 50L * 2L) stop("replicate_summaries wrong row count")
 pass("replicate_summaries row count correct")
+
+if (nrow(res$phat_long) != 50L * 10L) stop("phat_long wrong row count")
+if (!all(c("alpha", "p_max", "replicate", "index", "phat") %in% names(res$phat_long))) {
+  stop("phat_long missing expected columns")
+}
+pass("phat_long has expected shape and columns")
 
 if (nrow(res$curves) != 3L * 2L) stop("curves has wrong row count")
 pass("curves row count correct")
@@ -357,8 +363,90 @@ if (!setequal(unique(res_multi_pmax$curves$p_max), 0.8)) {
 }
 pass("multi-p_max run skips impossible combinations and keeps feasible ones")
 
-# ---- 9. plotting helpers: p_max filters -------------------------------------
-cat("\n9. plotting helper filters\n")
+# ---- 9. hybrid cutoff helpers ------------------------------------------------
+cat("\n9. hybrid cutoff helpers\n")
+
+phat_toy <- matrix(
+  c(
+    0.10, 0.90,
+    0.02, 0.98
+  ),
+  nrow = 2L,
+  byrow = TRUE
+)
+p_toy <- c(0.01, 0.99)
+
+hybrid_eval <- evaluate_hybrid_success_cell_level(
+  phat_mat = phat_toy,
+  p = p_toy,
+  cutoff = 0.05,
+  tau_AE = 0.05,
+  tau_ARE = 0.20
+)
+if (!isTRUE(all.equal(hybrid_eval$success_rate_cell, 0.75))) {
+  stop("hybrid cell-level success rate mismatch")
+}
+if (!isTRUE(all.equal(hybrid_eval$success_rate_replicate, 0.5))) {
+  stop("hybrid replicate-level success rate mismatch")
+}
+pass("evaluate_hybrid_success_cell_level computes expected rates")
+
+hybrid_curve <- sweep_hybrid_cutoffs_cell_level(
+  phat_mat = phat_toy,
+  p = p_toy,
+  cutoffs = c(0.02, 0.05),
+  tau_AE = 0.05,
+  tau_ARE = 0.20
+)
+if (nrow(hybrid_curve) != 2L) stop("sweep_hybrid_cutoffs_cell_level should return one row per cutoff")
+pass("sweep_hybrid_cutoffs_cell_level row count correct")
+
+best_hybrid <- find_best_hybrid_cutoff(
+  curve_df = hybrid_curve,
+  maximize = "cell",
+  tie_break = "smallest"
+)
+if (!isTRUE(all.equal(best_hybrid$best_cutoff, 0.02))) {
+  stop("find_best_hybrid_cutoff should select smallest tied cutoff")
+}
+if (best_hybrid$n_tied_maximizers != 2L) {
+  stop("find_best_hybrid_cutoff should report tied maximizer count")
+}
+pass("find_best_hybrid_cutoff tie handling works")
+
+hybrid_run <- run_hybrid_cutoff_analysis(
+  phat_mat = phat_toy,
+  p = p_toy,
+  cutoffs = c(0.02, 0.05),
+  tau_AE = 0.05,
+  tau_ARE = 0.20,
+  maximize = "cell",
+  alpha = 2,
+  p_max = 0.5
+)
+if (nrow(hybrid_run$best_summary) != 1L || !("best_cutoff" %in% names(hybrid_run$best_summary))) {
+  stop("run_hybrid_cutoff_analysis should return one-row best_summary")
+}
+pass("run_hybrid_cutoff_analysis returns best_summary")
+
+hybrid_exp <- run_simulation_hybrid_cutoff_experiment(
+  alpha = 2,
+  K = 5L,
+  n = 100L,
+  B = 10L,
+  cutoffs = c(0.02, 0.05),
+  tau_AE = 0.05,
+  tau_ARE = 0.20,
+  seed = 21L
+)
+expected_hybrid_fields <- c("inputs", "p_table", "phat_long", "cutoff_curves", "best_cutoff_summary")
+if (!all(expected_hybrid_fields %in% names(hybrid_exp))) {
+  stop("run_simulation_hybrid_cutoff_experiment missing expected fields")
+}
+pass("run_simulation_hybrid_cutoff_experiment returns expected fields")
+
+# ---- 10. plotting helpers: p_max filters ------------------------------------
+cat("\n10. plotting helper filters\n")
 
 proportions_plot_beta <- plot_proportions_curve(res)
 if (!inherits(proportions_plot_beta, "ggplot")) stop("plot_proportions_curve should return a ggplot object for beta results")
