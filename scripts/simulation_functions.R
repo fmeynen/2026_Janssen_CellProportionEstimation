@@ -1211,3 +1211,99 @@ run_simulation_hybrid_cutoff_experiment <- function(alpha, K, n, B, cutoffs,
     best_cutoff_summary = do.call(rbind, best_summary_list)
   )
 }
+
+
+# ---- K) Hybrid-cutoff visualisation -----------------------------------------
+
+#' Plot a heatmap of best hybrid cutoffs across AE/ARE threshold pairs.
+#'
+#' @param phat_mat       B x K numeric matrix of observed proportions.
+#' @param p              True proportion vector of length K.
+#' @param cutoffs        Numeric vector of candidate cutoffs.
+#' @param tau_AE_values  Numeric vector of AE thresholds for heatmap rows.
+#' @param tau_ARE_values Numeric vector of ARE thresholds for heatmap columns.
+#' @param maximize       Which success rate to maximize (`"cell"` or
+#'   `"replicate"`).
+#' @param tie_break      Tie-breaker among maximizing cutoffs:
+#'   `"smallest"`, `"largest"`, or `"median"`.
+#' @param label_digits   Number of digits displayed in cell labels.
+#'
+#' @return A ggplot heatmap object with fill and text labels equal to the
+#'   selected best cutoff for each (tau_AE, tau_ARE) pair.
+plot_hybrid_best_cutoff_heatmap <- function(phat_mat, p, cutoffs,
+                                            tau_AE_values, tau_ARE_values,
+                                            maximize = c("cell", "replicate"),
+                                            tie_break = c("smallest", "largest", "median"),
+                                            label_digits = 3L) {
+  maximize <- match.arg(maximize)
+  tie_break <- match.arg(tie_break)
+
+  stopifnot(
+    is.matrix(phat_mat),
+    is.numeric(p),
+    length(p) == ncol(phat_mat),
+    is.numeric(cutoffs),
+    length(cutoffs) >= 1L,
+    all(is.finite(cutoffs)),
+    is.numeric(tau_AE_values),
+    length(tau_AE_values) >= 1L,
+    all(is.finite(tau_AE_values)),
+    is.numeric(tau_ARE_values),
+    length(tau_ARE_values) >= 1L,
+    all(is.finite(tau_ARE_values)),
+    is.numeric(label_digits),
+    length(label_digits) == 1L,
+    is.finite(label_digits),
+    label_digits >= 0
+  )
+
+  threshold_grid <- expand.grid(
+    tau_AE = tau_AE_values,
+    tau_ARE = tau_ARE_values,
+    KEEP.OUT.ATTRS = FALSE,
+    stringsAsFactors = FALSE
+  )
+
+  rows <- lapply(seq_len(nrow(threshold_grid)), function(i) {
+    tau_AE_i <- threshold_grid$tau_AE[[i]]
+    tau_ARE_i <- threshold_grid$tau_ARE[[i]]
+    curve_i <- sweep_hybrid_cutoffs_cell_level(
+      phat_mat = phat_mat,
+      p = p,
+      cutoffs = cutoffs,
+      tau_AE = tau_AE_i,
+      tau_ARE = tau_ARE_i
+    )
+    best_i <- find_best_hybrid_cutoff(
+      curve_df = curve_i,
+      maximize = maximize,
+      tie_break = tie_break
+    )
+    data.frame(
+      tau_AE = tau_AE_i,
+      tau_ARE = tau_ARE_i,
+      best_cutoff = best_i$best_cutoff,
+      stringsAsFactors = FALSE
+    )
+  })
+
+  heatmap_df <- do.call(rbind, rows)
+  heatmap_df$tau_AE <- factor(heatmap_df$tau_AE, levels = sort(unique(tau_AE_values), decreasing = TRUE))
+  heatmap_df$tau_ARE <- factor(heatmap_df$tau_ARE, levels = sort(unique(tau_ARE_values)))
+  heatmap_df$label <- formatC(heatmap_df$best_cutoff, digits = as.integer(label_digits), format = "f")
+
+  ggplot2::ggplot(
+    heatmap_df,
+    ggplot2::aes(x = tau_ARE, y = tau_AE, fill = best_cutoff)
+  ) +
+    ggplot2::geom_tile(color = "white", linewidth = 0.4) +
+    ggplot2::geom_text(ggplot2::aes(label = label), size = 3) +
+    ggplot2::scale_fill_gradient(low = "#F7FBFF", high = "#08306B") +
+    ggplot2::labs(
+      x = "ARE threshold (tau_ARE)",
+      y = "AE threshold (tau_AE)",
+      fill = "Best cutoff",
+      title = "Best hybrid cutoff heatmap"
+    ) +
+    ggplot2::theme_bw()
+}

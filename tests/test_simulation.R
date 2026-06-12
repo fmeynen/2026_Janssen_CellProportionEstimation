@@ -445,6 +445,33 @@ if (!all(expected_hybrid_fields %in% names(hybrid_exp))) {
 }
 pass("run_simulation_hybrid_cutoff_experiment returns expected fields")
 
+# heatmap over AE/ARE threshold pairs should expose best cutoffs per cell
+phat_heatmap <- matrix(
+  c(
+    0.01, 0.99,
+    0.06, 0.94,
+    0.20, 0.80
+  ),
+  nrow = 3L,
+  byrow = TRUE
+)
+heatmap_plot <- plot_hybrid_best_cutoff_heatmap(
+  phat_mat = phat_heatmap,
+  p = c(0.02, 0.98),
+  cutoffs = c(0.02, 0.05, 0.10, 0.20),
+  tau_AE_values = c(0.01, 0.05),
+  tau_ARE_values = c(0.05, 0.20),
+  maximize = "cell",
+  label_digits = 3L
+)
+if (!inherits(heatmap_plot, "ggplot")) stop("plot_hybrid_best_cutoff_heatmap should return a ggplot object")
+heatmap_build <- ggplot2::ggplot_build(heatmap_plot)
+if (nrow(heatmap_build$data[[1]]) != 4L) stop("heatmap should include one tile per AE/ARE threshold pair")
+if (!setequal(unique(heatmap_build$data[[2]]$label), c("0.020", "0.100"))) {
+  stop("heatmap labels should include expected best-cutoff values")
+}
+pass("plot_hybrid_best_cutoff_heatmap returns expected tiles and labels")
+
 # ---- 10. plotting helpers: p_max filters ------------------------------------
 cat("\n10. plotting helper filters\n")
 
