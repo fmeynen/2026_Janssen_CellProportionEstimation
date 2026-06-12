@@ -472,6 +472,19 @@ if (!setequal(unique(heatmap_build$data[[2]]$label), c("0.020", "0.100"))) {
 }
 pass("plot_hybrid_best_cutoff_heatmap returns expected tiles and labels")
 
+heatmap_plot_k3 <- plot_hybrid_best_cutoff_heatmap(
+  phat_mat = matrix(c(0.10, 0.20, 0.70, 0.15, 0.25, 0.60), nrow = 2L, byrow = TRUE),
+  p = c(0.10, 0.20, 0.70),
+  cutoffs = c(0.05, 0.10, 0.20),
+  tau_AE_values = c(0.02, 0.05),
+  tau_ARE_values = c(0.10, 0.20),
+  maximize = "cell"
+)
+if (!inherits(heatmap_plot_k3, "ggplot")) {
+  stop("plot_hybrid_best_cutoff_heatmap should support K > 2 inputs")
+}
+pass("plot_hybrid_best_cutoff_heatmap supports K > 2 inputs")
+
 # ---- 10. plotting helpers: p_max filters ------------------------------------
 cat("\n10. plotting helper filters\n")
 

@@ -1217,7 +1217,8 @@ run_simulation_hybrid_cutoff_experiment <- function(alpha, K, n, B, cutoffs,
 
 #' Plot a heatmap of best hybrid cutoffs across AE/ARE threshold pairs.
 #'
-#' @param phat_mat       B x K numeric matrix of observed proportions.
+#' @param phat_mat       B x K numeric matrix of observed proportions (B
+#'   replicates by K cell types).
 #' @param p              True proportion vector of length K.
 #' @param cutoffs        Numeric vector of candidate cutoffs.
 #' @param tau_AE_values  Numeric vector of AE thresholds for heatmap rows.
@@ -1254,6 +1255,7 @@ plot_hybrid_best_cutoff_heatmap <- function(phat_mat, p, cutoffs,
     is.numeric(label_digits),
     length(label_digits) == 1L,
     is.finite(label_digits),
+    label_digits == as.integer(label_digits),
     label_digits >= 0
   )
 
