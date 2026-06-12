@@ -1255,7 +1255,7 @@ plot_hybrid_best_cutoff_heatmap <- function(phat_mat, p, cutoffs,
     is.numeric(label_digits),
     length(label_digits) == 1L,
     is.finite(label_digits),
-    label_digits == as.integer(label_digits),
+    label_digits %% 1 == 0,
     label_digits >= 0
   )
 
@@ -1292,7 +1292,7 @@ plot_hybrid_best_cutoff_heatmap <- function(phat_mat, p, cutoffs,
   heatmap_df <- do.call(rbind, rows)
   heatmap_df$tau_AE <- factor(heatmap_df$tau_AE, levels = sort(unique(tau_AE_values), decreasing = TRUE))
   heatmap_df$tau_ARE <- factor(heatmap_df$tau_ARE, levels = sort(unique(tau_ARE_values)))
-  heatmap_df$label <- formatC(heatmap_df$best_cutoff, digits = as.integer(label_digits), format = "f")
+  heatmap_df$label <- formatC(heatmap_df$best_cutoff, digits = label_digits, format = "f")
 
   ggplot2::ggplot(
     heatmap_df,
