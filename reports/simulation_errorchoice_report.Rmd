@@ -12,7 +12,7 @@ params:
   p_max:
     value: [0.2, 0.3, 0.4, 0.5, 0.6]
   K: 10
-  n: 1000
+  n: 10000
   B: 5000
   seed: 260926
 ---
@@ -27,6 +27,8 @@ source(here::here("scripts", "simulation_errorchoice.R"))
 ```
 
 # Overview
+
+**This is an updated report with an increased number of cells per sample (more realistic) and shows the TSE (transformed square error:** $asinh \sqrt(2n^2(p-\hat p)^2)$ **and LAE (log absolute error:** $log(|p- \hat p|)$ 
 
 This report evaluates multinomial sampling error across cell-type proportions generated from a weighted Beta(\(\alpha, 1\)) distribution.
 
@@ -49,7 +51,7 @@ config_beta <- list(
   n = as.integer(params$n),
   B = as.integer(params$B),
   taus = taus,
-  metrics = c("AE", "ARE"),
+  metrics = c("AE", "ARE", "LAE", "TSE"),
   model = "multinomial",
   proportion_method = "beta",
   tie_method = "random",

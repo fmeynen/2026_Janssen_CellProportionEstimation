@@ -276,7 +276,7 @@ counts_to_proportions <- function(y, n = sum(y)) {
 #' @details
 #' AE  = abs(phat - p)
 #' ARE = abs(phat - p) / p  (no epsilon stabilisation; NaN/Inf for p == 0 is expected)
-compute_errors <- function(phat, p, metrics = c("AE", "ARE"), n) {
+compute_errors <- function(phat, p, metrics = c("AE", "ARE"), n=NULL) {
   stopifnot(length(phat) == length(p))
   result <- list()
   if ("AE" %in% metrics) {
@@ -286,7 +286,7 @@ compute_errors <- function(phat, p, metrics = c("AE", "ARE"), n) {
     result[["ARE"]] <- abs(phat - p) / p   # NaN when p == 0 and phat == 0; Inf when p == 0 and phat != 0; no stabilisation by design
   }
   if("TSE" %in% metrics){
-    result[["ATE"]] <- asinh(sqrt(2*n^2(phat-p)^2))
+    result[["TSE"]] <- asinh(sqrt(2*n^2*(phat-p)^2))
   }
   if("LAE" %in% metrics){
     result[["LAE"]] <- log(abs(phat-p))

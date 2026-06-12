@@ -23,14 +23,14 @@ source(here::here("scripts", "simulation_functions.R"))
 simulation_errorchoice_defaults <- function() {
   taus_AE <- exp(seq(0, log(1 + 0.02), by = 0.0005)) - 1
   taus_ARE <- 10^seq(0, log10(1 + 1.5), by = 0.0005) - 1
-  taus_ATE <- 10^seq(0, log10(1 + 1.5), by = 0.0005) - 1
-  taus_LAE <- 10^seq(0, log10(1 + 1.5), by = 0.0005) - 1
+  taus_TSE <- 10^seq(0, log10(1 + 7.5), by = 0.005) - 1
+  taus_LAE <- 10^seq(0, log10(1 + 0.001), by = 0.000005) - 1
   list(
     alpha = c(2, 2.5, 3, 4, 5),
     K = 10L,
     n = 1000L,
     B = 5000L,
-    taus = list(AE = taus_AE, ARE = taus_ARE),
+    taus = list(AE = taus_AE, ARE = taus_ARE, TSE = taus_TSE, LAE = taus_LAE),
     metrics = c("AE", "ARE"),
     model = "multinomial",
     tie_method = "random",
