@@ -52,7 +52,7 @@ run_simulation_errorchoice <- function(config = simulation_errorchoice_defaults(
   result_file <- simulation_result_path(
     config = config,
     dir    = cache_dir,
-    name   = "errochoice"
+    name   = "errorchoice"
   )
 
   if (cache && !force_recompute && file.exists(result_file)) {
@@ -78,18 +78,4 @@ run_simulation_errorchoice <- function(config = simulation_errorchoice_defaults(
   }
 
   result
-}
-
-# ---- Script execution ------------------------------------------------------
-is_simulation_errorchoice_main <- function() {
-  args <- commandArgs(trailingOnly = FALSE)
-  any(grepl("--file=.*simulation_errorchoice\\.R$", args))
-}
-
-if (is_simulation_errorchoice_main()) {
-  config <- simulation_errorchoice_defaults()
-  result <- run_simulation_errorchoice(config)
-
-  print(result$p_table)
-  print(head(result$curves))
 }

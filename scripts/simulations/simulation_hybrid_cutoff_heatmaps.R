@@ -89,15 +89,3 @@ run_simulation_hybrid_heatmaps <- function(config = simulation_hybrid_heatmap_de
 
   result
 }
-
-is_simulation_hybrid_heatmap_main <- function() {
-  args <- commandArgs(trailingOnly = FALSE)
-  any(grepl("--file=.*simulation_hybrid_cutoff_heatmaps\\.R$", args))
-}
-
-if (is_simulation_hybrid_heatmap_main()) {
-  config <- simulation_hybrid_heatmap_defaults()
-  result <- run_simulation_hybrid_heatmaps(config)
-
-  print(result$p_table)
-}
