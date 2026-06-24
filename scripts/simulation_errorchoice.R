@@ -68,9 +68,21 @@ is_simulation_errorchoice_main <- function() {
 }
 
 if (is_simulation_errorchoice_main()) {
-  result <- run_simulation_errorchoice()
-  
-  saveRDS(result, file = "results/simresults/simulation_errorchoice.RData")
+  config      <- simulation_errorchoice_defaults()
+  result_file <- simulation_result_path(
+    config = config,
+    dir    = here::here("results", "simresults"),
+    name   = "simulation_errorchoice"
+  )
+
+  if (file.exists(result_file)) {
+    message("Loading saved result: ", basename(result_file))
+    result <- readRDS(result_file)
+  } else {
+    result <- run_simulation_errorchoice(config)
+    saveRDS(result, result_file)
+    message("Result saved: ", basename(result_file))
+  }
 
   cat("True proportions (p):\n")
   print(round(result$p_table, 6))
