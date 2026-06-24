@@ -677,7 +677,7 @@ plot_argmax_histogram <- function(result, metric, alphas = NULL, p_maxs = NULL) 
   )
   df <- result$replicate_summaries
   metric_is_scalar_character <- is.character(metric) && length(metric) == 1L && !is.na(metric)
-  metric_is_supported <- metric_is_scalar_character && metric %in% c("AE", "ARE")
+  metric_is_supported <- metric_is_scalar_character && metric %in% c("AE", "ARE", "TSE", "LAE")
   if (!metric_is_supported) {
     stop("metric must be a single value: 'AE' or 'ARE'.", call. = FALSE)
   }
