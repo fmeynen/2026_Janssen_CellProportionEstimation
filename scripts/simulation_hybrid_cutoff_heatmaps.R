@@ -77,13 +77,21 @@ is_simulation_hybrid_heatmap_main <- function() {
 }
 
 if (is_simulation_hybrid_heatmap_main()) {
-  config <- simulation_hybrid_heatmap_defaults()
-  result <- cached_simulation(
-    run_fn    = function() run_simulation_hybrid_heatmaps(config),
-    config    = config,
-    cache_dir = here::here("results", "simresults"),
-    name      = "simulation_hybrid_heatmaps"
+  config      <- simulation_hybrid_heatmap_defaults()
+  result_file <- simulation_result_path(
+    config = config,
+    dir    = here::here("results", "simresults"),
+    name   = "simulation_hybrid_heatmaps"
   )
+
+  if (file.exists(result_file)) {
+    message("Loading saved result: ", basename(result_file))
+    result <- readRDS(result_file)
+  } else {
+    result <- run_simulation_hybrid_heatmaps(config)
+    saveRDS(result, result_file)
+    message("Result saved: ", basename(result_file))
+  }
 
   cat("True proportions table:\n")
   print(round(result$p_table, 6))
