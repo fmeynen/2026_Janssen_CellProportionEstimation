@@ -18,7 +18,11 @@
 #   * Additional error metrics
 #   * Distribution of max errors (not just success rates)
 # ---------------------------------------------------------------------------
-source(here::here("scripts", "simulation_functions.R"))
+simulation_helper_files <- list.files(here::here("scripts", "simulation_layers"))
+lapply(simulation_helper_files, function(f){
+  source(here::here("scripts", "simulation_layers", f))
+})
+
 # ---- Parameters ------------------------------------------------------------
 simulation_errorchoice_defaults <- function() {
   taus_AE <- exp(seq(0, log(1 + 0.02), by = 0.0005)) - 1
@@ -31,11 +35,11 @@ simulation_errorchoice_defaults <- function() {
     n = 1000L,
     B = 5000L,
     taus = list(AE = taus_AE, ARE = taus_ARE, TSE = taus_TSE, LAE = taus_LAE),
-    metrics = c("AE", "ARE"),
+    metrics = c("AE", "ARE", "LAE", "TSE"),
     model = "multinomial",
     tie_method = "random",
-    proportion_method = "fixed_max_beta",
-    p_max = c(0.2, 0.3,0.4, 0.5),
+    proportion_method = "beta",
+    #p_max = c(0.2, 0.3,0.4, 0.5),
     seed = 260926L
   )
 }
@@ -77,9 +81,11 @@ if (is_simulation_errorchoice_main()) {
 
   cat("\nArgmax summary (first 20 rows):\n")
   print(head(result$argmax_summary, 20))
-
+  
+  plot_success_rate_curve(result, metric = "AE")
+  plot_success_rate_curve(result, metric = "ARE")
   plot_success_rate_curve(result, metric = "LAE")
-  plot_success_rate_curve(result, metric = "ATE")
+  plot_success_rate_curve(result, metric = "TSE")
   plot_success_rate_curve(result, metric = NULL)
   plot_success_rate_curve(result, metric = "AE", alphas = c(2, 5))
   

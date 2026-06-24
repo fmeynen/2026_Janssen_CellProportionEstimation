@@ -1,0 +1,253 @@
+# R/simulation.R
+#
+# Simulation layer: generate true proportions, simulate counts, run replicates.
+#
+# Depends on: R/validation_utils.R, R/calculation.R (compute_errors, max_error_summary)
+# ---------------------------------------------------------------------------
+
+
+#' Generate K true proportions from dbeta(grid, alpha, 1), always rescaled.
+#'
+#' @param alpha  shape1 parameter of Beta(alpha, 1); controls curve steepness.
+#' @param K      number of cell types (default 10).
+#' @param grid   evaluation points in (0,1) (default K equidistant points from
+#'               0.05 to 0.95, avoiding boundary values where dbeta returns 0).
+#'
+#' @return Numeric vector of length K, all strictly positive, summing to 1.
+#'
+#' @details
+#' Unscaled weights: w = dbeta(grid, shape1 = alpha, shape2 = 1).
+#' The default grid avoids 0 and 1 so that all weights — and therefore all
+#' proportions — are strictly positive.  This prevents ARE from producing
+#' NaN or Inf values for any cell type under the default parameters.
+generate_proportions_beta <- function(alpha, K = 10, grid = default_beta_grid(K)) {
+  stopifnot(is.numeric(alpha), length(alpha) == 1L, alpha > 0)
+  stopifnot(length(grid) == K)
+  w <- dbeta(grid, shape1 = alpha, shape2 = 1)
+  p <- normalize_to_simplex(w)
+  validate_proportions(p)
+  p
+}
+
+#' Generate K true proportions with a fixed maximum at the highest index.
+#'
+#' @param alpha  shape1 parameter of the Beta(alpha, 1) remainder curve.
+#' @param K      number of cell types (default 10; must be at least 2).
+#' @param p_max  fixed largest true proportion(s), placed at the highest index.
+#' @param grid   evaluation points in (0,1), length K - 1, used to construct
+#'               the Beta-shaped remainder over the first K - 1 indices.
+#'
+#' @return If `length(p_max) == 1`, a numeric vector of length K, all strictly
+#'   positive, summing to 1, with a strictly unique largest value at index K.
+#'   If `length(p_max) > 1`, a numeric matrix with one row per `p_max` value
+#'   and K columns (`index_1`, ..., `index_K`).
+#'
+#' @details
+#' The first `K - 1` proportions are built from Beta(alpha, 1) weights,
+#' normalized and then rescaled to sum to `1 - p_max`. The final proportion is
+#' set to `p_max`, so the largest true proportion is fixed at the highest
+#' index. If the rescaled remainder contains any value `>= p_max`, the
+#' combination of `alpha`, `K`, and `p_max` is impossible for a strictly unique
+#' fixed maximum; the function warns and then fails. When `p_max` contains
+#' multiple values, this construction is applied independently per value.
+generate_proportions_fixed_max_beta <- function(alpha, K = 10, p_max,
+                                                grid = default_beta_grid(K - 1L)) {
+  if (!is.numeric(alpha) || length(alpha) != 1L || !is.finite(alpha) || alpha <= 0) {
+    stop("alpha must be a single positive number.", call. = FALSE)
+  }
+  if (!is.numeric(K) || length(K) != 1L || !is.finite(K) || K %% 1 != 0 || K < 2L) {
+    stop("K must be a single integer >= 2 for method = 'fixed_max_beta'.", call. = FALSE)
+  }
+  if (is.null(p_max)) {
+    stop("p_max must be provided when method = 'fixed_max_beta'.", call. = FALSE)
+  }
+  if (!is.numeric(p_max) || any(!is.finite(p_max)) || any(p_max <= 0) || any(p_max >= 1)) {
+    stop("p_max must contain number(s) strictly between 0 and 1.", call. = FALSE)
+  }
+  if (length(grid) != K - 1L) {
+    stop("grid must have length K - 1 for method = 'fixed_max_beta'.", call. = FALSE)
+  }
+  if (length(p_max) > 1L) {
+    p_mat <- t(vapply(
+      p_max,
+      function(p_max_i) {
+        generate_proportions_fixed_max_beta(alpha = alpha, K = K, p_max = p_max_i, grid = grid)
+      },
+      FUN.VALUE = numeric(K)
+    ))
+    colnames(p_mat) <- paste0("index_", seq_len(K))
+    rownames(p_mat) <- paste0("p_max_", seq_along(p_max), "_", format(p_max, trim = TRUE))
+    return(p_mat)
+  }
+
+  remainder_weights <- dbeta(grid, shape1 = alpha, shape2 = 1)
+  remainder <- (1 - p_max) * normalize_to_simplex(remainder_weights)
+
+  if (any(remainder >= p_max)) {
+    fail_fixed_max_beta_impossible(
+      non_max = remainder,
+      alpha = alpha,
+      K = K,
+      p_max = p_max
+    )
+  }
+
+  p <- c(remainder, p_max)
+  validate_proportions(p)
+  p
+}
+
+#' Dispatcher: generate true proportions from the requested method.
+#'
+#' @param alpha   Shape parameter used by the requested generation method.
+#' @param K       Number of cell types (default 10).
+#' @param method  Proportion-generation method: `"beta"` or `"fixed_max_beta"`.
+#' @param p_max   Fixed largest true proportion for `"fixed_max_beta"`. The
+#'   largest value is always placed at the highest index and must remain
+#'   strictly unique; impossible combinations warn and fail. May be a numeric
+#'   vector when calling the fixed-max generator directly.
+#' @param grid    Evaluation points in (0,1), length K (used by `"beta"`).
+#'
+#' @return Numeric vector of length K, all strictly positive, summing to 1.
+#'   For method `"fixed_max_beta"` with vector `p_max`, returns a numeric
+#'   matrix with one row per `p_max` value and K columns.
+generate_proportions <- function(alpha, K = 10,
+                                 method = c("beta", "fixed_max_beta"),
+                                 p_max = NULL,
+                                 grid = default_beta_grid(K)) {
+  method <- match.arg(method)
+  switch(method,
+    beta = generate_proportions_beta(alpha = alpha, K = K, grid = grid),
+    fixed_max_beta = generate_proportions_fixed_max_beta(
+      alpha = alpha,
+      K = K,
+      p_max = p_max
+    )
+  )
+}
+
+
+#' Simulate one vector of counts from Multinomial(n, p).
+#'
+#' @param p  True proportion vector (length K, sums to 1).
+#' @param n  Total sample size (positive integer).
+#'
+#' @return Integer vector of length K summing to n.
+simulate_counts_multinomial <- function(p, n) {
+  stopifnot(is.numeric(p), all(p >= 0), abs(sum(p) - 1) < 1e-10)
+  stopifnot(is.numeric(n), length(n) == 1L, n >= 1L)
+  as.integer(rmultinom(1L, size = n, prob = p))
+}
+
+# Placeholder: to be implemented when overdispersion support is added.
+# simulate_counts_dirichlet_multinomial <- function(p, n, concentration, ...) {
+#   stop("Dirichlet-multinomial not yet implemented.")
+# }
+
+# Placeholder: to be implemented when correlation support is added.
+# simulate_counts_logistic_normal_multinomial <- function(p, n, Sigma, ...) {
+#   stop("Logistic-normal multinomial not yet implemented.")
+# }
+
+#' Dispatcher: simulate counts from the requested model.
+#'
+#' @param p      True proportion vector.
+#' @param n      Total sample size.
+#' @param model  Sampling model; currently only "multinomial" is implemented.
+#' @param ...    Additional arguments forwarded to the concrete simulator
+#'               (reserved for future overdispersed / correlated models).
+#'
+#' @return Integer vector of length K summing to n.
+simulate_counts <- function(p, n,
+                            model = c("multinomial",
+                                      "dirichlet_multinomial",
+                                      "logistic_normal_multinomial"),
+                            ...) {
+  model <- match.arg(model)
+  switch(model,
+    multinomial = simulate_counts_multinomial(p, n),
+    dirichlet_multinomial = stop(
+      "model = 'dirichlet_multinomial' is not yet implemented."
+    ),
+    logistic_normal_multinomial = stop(
+      "model = 'logistic_normal_multinomial' is not yet implemented."
+    )
+  )
+}
+
+#' Convert count vector to observed proportions.
+#'
+#' @param y  Integer count vector (length K, sums to n).
+#' @param n  Total sample size; defaults to sum(y).
+#'
+#' @return Numeric vector of observed proportions summing to 1.
+counts_to_proportions <- function(y, n = sum(y)) {
+  stopifnot(is.numeric(y) || is.integer(y), n > 0)
+  y / n
+}
+
+
+#' Run B simulation replicates and store max errors + argmax indices.
+#'
+#' Efficiency strategy: simulate B times once, store only the per-replicate
+#' max error values and argmax indices.  Threshold evaluation is done
+#' post-hoc by `evaluate_thresholds()` without re-simulating.
+#'
+#' @param p          True proportion vector (length K).
+#' @param n          Total sample size.
+#' @param B          Number of replicates.
+#' @param metrics    Error metrics to compute; any subset of
+#'   `c("AE", "ARE", "TSE", "LAE")`.
+#' @param model      Sampling model passed to `simulate_counts()`.
+#' @param tie_method Tie-breaking rule passed to `max_error_summary()`.
+#' @param seed       Optional integer seed for reproducibility.
+#' @param ...        Additional arguments forwarded to `simulate_counts()`.
+#'
+#' @return List with elements:
+#'   \describe{
+#'     \item{max_errors}{B x M numeric matrix of max error values.}
+#'     \item{argmax}{B x M integer matrix of argmax indices.}
+#'     \item{errors}{B x K x M numeric array of per-cell-type errors.}
+#'     \item{phat}{B x K numeric matrix of observed proportions.}
+#'     \item{inputs}{Copy of all input arguments (including seed used).}
+#'   }
+run_replicates <- function(p, n, B,
+                           metrics = c("AE", "ARE"),
+                           model = "multinomial",
+                           tie_method = "random",
+                           seed = NULL, ...) {
+  if (!is.null(seed)) set.seed(seed)
+  K <- length(p)
+  stopifnot(K >= 1L, B >= 1L)
+
+  max_errors <- matrix(NA_real_,    nrow = B, ncol = length(metrics),
+                       dimnames = list(NULL, metrics))
+  argmax     <- matrix(NA_integer_, nrow = B, ncol = length(metrics),
+                       dimnames = list(NULL, metrics))
+  errors     <- array(NA_real_, dim = c(B, K, length(metrics)),
+                      dimnames = list(NULL, seq_len(K), metrics))
+  phat       <- matrix(NA_real_, nrow = B, ncol = K)
+
+  for (b in seq_len(B)) {
+    y_b      <- simulate_counts(p, n, model = model, ...)
+    phat_b   <- counts_to_proportions(y_b, n)
+    phat[b, ] <- phat_b
+    errors_b <- compute_errors(phat_b, p, metrics = metrics, n = n)
+
+    for (m in metrics) {
+      s <- max_error_summary(errors_b[[m]], tie_method = tie_method)
+      max_errors[b, m] <- s$max_error_value
+      argmax[b, m]     <- s$argmax_index
+      errors[b, , m]   <- errors_b[[m]]
+    }
+  }
+
+  list(
+    max_errors = max_errors,
+    argmax     = argmax,
+    errors     = errors,
+    phat       = phat,
+    inputs     = list(p = p, n = n, B = B, metrics = metrics,
+                      model = model, tie_method = tie_method, seed = seed)
+  )
+}

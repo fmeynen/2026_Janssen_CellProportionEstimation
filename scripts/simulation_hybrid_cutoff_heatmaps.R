@@ -3,7 +3,10 @@
 # Small driver script to simulate hybrid AE/ARE cutoff heatmaps
 # for multiple alpha values.
 
-source(here::here("scripts", "simulation_functions.R"))
+simulation_helper_files <- list.files(here::here("scripts", "simulation_layers"))
+lapply(simulation_helper_files, function(f){
+  source(here::here("scripts", "simulation_layers", f))
+})
 
 simulation_hybrid_heatmap_defaults <- function() {
   list(
