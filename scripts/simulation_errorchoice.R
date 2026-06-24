@@ -18,12 +18,10 @@
 #   * Additional error metrics
 #   * Distribution of max errors (not just success rates)
 # ---------------------------------------------------------------------------
-source(here::here("R", "validation_utils.R"))
-source(here::here("R", "calculation.R"))
-source(here::here("R", "extraction.R"))
-source(here::here("R", "simulation.R"))
-source(here::here("R", "orchestration.R"))
-source(here::here("R", "visualisation.R"))
+simulation_helper_files <- list.files(here::here("scripts", "simulation_layers"))
+lapply(simulation_helper_files, function(f){
+  source(here::here("scripts", "simulation_layers", f))
+})
 
 # ---- Parameters ------------------------------------------------------------
 simulation_errorchoice_defaults <- function() {
