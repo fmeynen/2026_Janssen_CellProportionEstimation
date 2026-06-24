@@ -14,7 +14,7 @@ simulation_hybrid_heatmap_defaults <- function() {
     K = 10L,
     n = 1000L,
     B = 500L,
-    cutoffs = seq(0, 0.5, by = 0.01),
+    cutoffs = seq(0, 0.5, by = 0.002),
     tau_AE_values = c(0.01, 0.02, 0.03, 0.04, 0.05),
     tau_ARE_values = c(0.2, 0.4, 0.6, 0.8, 1.0, 1.2),
     maximize = "replicate",
