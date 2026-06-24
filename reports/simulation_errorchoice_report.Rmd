@@ -148,6 +148,17 @@ plot_argmax_histogram(result_beta, metric = "ARE")
 
 The ARE is driven mostly by the 2-3 cell types with the smallest proportion. Note for \(\alpha = 5\), the 2nd smallest proportion actually has the largest ARE, most of the time. The smallest proportion will often have a simulated cell count of 0, resulting in an ARE of exactly 1. The second smallest proportion then has a possibility to show a larger ARE.
 
+```{r argmax-hist-TSE, fig.cap="Argmax histograms by alpha for TSE maximum-error indices."}
+plot_argmax_histogram(result_beta, metric = "TSE")
+```
+
+```{r argmax-hist-LAE, fig.cap="Argmax histograms by alpha for LAE maximum-error indices."}
+plot_argmax_histogram(result_beta, metric = "LAE")
+```
+
+
+
+
 \newpage
 
 # Keep highest proportion fixed, vary other proportions
