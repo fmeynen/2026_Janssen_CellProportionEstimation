@@ -77,7 +77,13 @@ is_simulation_hybrid_heatmap_main <- function() {
 }
 
 if (is_simulation_hybrid_heatmap_main()) {
-  result <- run_simulation_hybrid_heatmaps()
+  config <- simulation_hybrid_heatmap_defaults()
+  result <- cached_simulation(
+    run_fn    = function() run_simulation_hybrid_heatmaps(config),
+    config    = config,
+    cache_dir = here::here("results", "simresults"),
+    name      = "simulation_hybrid_heatmaps"
+  )
 
   cat("True proportions table:\n")
   print(round(result$p_table, 6))
