@@ -45,8 +45,21 @@ simulation_errorchoice_defaults <- function() {
 }
 
 # ---- Run experiment --------------------------------------------------------
-run_simulation_errorchoice <- function(config = simulation_errorchoice_defaults()) {
-  run_simulation_experiment(
+run_simulation_errorchoice <- function(config = simulation_errorchoice_defaults(),
+                                       cache = TRUE,
+                                       force_recompute = FALSE,
+                                       cache_dir = here::here("results", "simresults")) {
+  result_file <- simulation_result_path(
+    config = config,
+    dir    = cache_dir,
+    name   = "errochoice"
+  )
+
+  if (cache && !force_recompute && file.exists(result_file)) {
+    return(readRDS(result_file))
+  }
+
+  result <- run_simulation_experiment(
     alpha = config$alpha,
     K = config$K,
     n = config$n,
@@ -59,6 +72,12 @@ run_simulation_errorchoice <- function(config = simulation_errorchoice_defaults(
     p_max = config$p_max,
     seed = config$seed
   )
+
+  if (cache) {
+    saveRDS(result, result_file)
+  }
+
+  result
 }
 
 # ---- Script execution ------------------------------------------------------
@@ -68,38 +87,9 @@ is_simulation_errorchoice_main <- function() {
 }
 
 if (is_simulation_errorchoice_main()) {
-  config      <- simulation_errorchoice_defaults()
-  result_file <- simulation_result_path(
-    config = config,
-    dir    = here::here("results", "simresults"),
-    name   = "simulation_errorchoice"
-  )
+  config <- simulation_errorchoice_defaults()
+  result <- run_simulation_errorchoice(config)
 
-  if (file.exists(result_file)) {
-    message("Loading saved result: ", basename(result_file))
-    result <- readRDS(result_file)
-  } else {
-    result <- run_simulation_errorchoice(config)
-    saveRDS(result, result_file)
-    message("Result saved: ", basename(result_file))
-  }
-
-  cat("True proportions (p):\n")
-  print(round(result$p_table, 6))
-  plot_proportions_curve(result = result)
-
-  cat("\nSuccess-rate curves (first 10 rows):\n")
-  print(head(result$curves, 10))
-
-  cat("\nArgmax summary (first 20 rows):\n")
-  print(head(result$argmax_summary, 20))
-  
-  plot_success_rate_curve(result, metric = "AE")
-  plot_success_rate_curve(result, metric = "ARE")
-  plot_success_rate_curve(result, metric = "LAE")
-  plot_success_rate_curve(result, metric = "TSE")
-  plot_success_rate_curve(result, metric = NULL)
-  plot_success_rate_curve(result, metric = "AE", alphas = c(2, 5))
-  
-  plot_argmax_histogram(result, metric = "AE")
+  print(result$p_table)
+  print(head(result$curves))
 }

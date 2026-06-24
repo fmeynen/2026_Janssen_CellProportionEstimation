@@ -22,7 +22,20 @@ simulation_hybrid_heatmap_defaults <- function() {
   )
 }
 
-run_simulation_hybrid_heatmaps <- function(config = simulation_hybrid_heatmap_defaults()) {
+run_simulation_hybrid_heatmaps <- function(config = simulation_hybrid_heatmap_defaults(),
+                                           cache = TRUE,
+                                           force_recompute = FALSE,
+                                           cache_dir = here::here("results", "simresults")) {
+  result_file <- simulation_result_path(
+    config = config,
+    dir    = cache_dir,
+    name   = "hybrid_heatmaps"
+  )
+
+  if (cache && !force_recompute && file.exists(result_file)) {
+    return(readRDS(result_file))
+  }
+
   sim_out <- run_simulation_experiment(
     alpha = config$alpha,
     K = config$K,
@@ -63,12 +76,18 @@ run_simulation_hybrid_heatmaps <- function(config = simulation_hybrid_heatmap_de
   })
   names(plots) <- paste0("alpha_", config$alpha)
 
-  list(
+  result <- list(
     config = config,
     p_table = p_table,
     phat_long = sim_out$phat_long,
     heatmaps = plots
   )
+
+  if (cache) {
+    saveRDS(result, result_file)
+  }
+
+  result
 }
 
 is_simulation_hybrid_heatmap_main <- function() {
@@ -77,26 +96,8 @@ is_simulation_hybrid_heatmap_main <- function() {
 }
 
 if (is_simulation_hybrid_heatmap_main()) {
-  config      <- simulation_hybrid_heatmap_defaults()
-  result_file <- simulation_result_path(
-    config = config,
-    dir    = here::here("results", "simresults"),
-    name   = "simulation_hybrid_heatmaps"
-  )
+  config <- simulation_hybrid_heatmap_defaults()
+  result <- run_simulation_hybrid_heatmaps(config)
 
-  if (file.exists(result_file)) {
-    message("Loading saved result: ", basename(result_file))
-    result <- readRDS(result_file)
-  } else {
-    result <- run_simulation_hybrid_heatmaps(config)
-    saveRDS(result, result_file)
-    message("Result saved: ", basename(result_file))
-  }
-
-  cat("True proportions table:\n")
-  print(round(result$p_table, 6))
-
-  for (plot_name in names(result$heatmaps)) {
-    print(result$heatmaps[[plot_name]])
-  }
+  print(result$p_table)
 }
