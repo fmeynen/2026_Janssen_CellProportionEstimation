@@ -1,6 +1,6 @@
 # tests/test_simulation.R
 #
-# Base-R test script for simulation_functions.R.
+# Base-R test script for the layered simulation modules under R/.
 #
 # Run from the repository root:
 #   Rscript tests/test_simulation.R
@@ -9,7 +9,12 @@
 # (or a local developer) can immediately identify what broke.
 # ---------------------------------------------------------------------------
 
-source(file.path("scripts", "simulation_functions.R"))
+source(file.path("R", "validation_utils.R"))
+source(file.path("R", "calculation.R"))
+source(file.path("R", "extraction.R"))
+source(file.path("R", "simulation.R"))
+source(file.path("R", "orchestration.R"))
+source(file.path("R", "visualisation.R"))
 
 pass <- function(name) cat(sprintf("  PASS  %s\n", name))
 
@@ -530,7 +535,7 @@ err_plot_missing_metric <- tryCatch(
   plot_argmax_histogram(res_multi_pmax),
   error = function(e) e$message
 )
-if (!identical(err_plot_missing_metric, "metric must be a single value: 'AE' or 'ARE'.")) {
+if (!identical(err_plot_missing_metric, "metric must be a single value: 'AE', 'ARE', 'TSE', or 'LAE'.")) {
   stop("plot_argmax_histogram should require a valid metric")
 }
 pass("plot_argmax_histogram requires metric")

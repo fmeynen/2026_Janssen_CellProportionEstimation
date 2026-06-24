@@ -18,7 +18,12 @@
 #   * Additional error metrics
 #   * Distribution of max errors (not just success rates)
 # ---------------------------------------------------------------------------
-source(here::here("scripts", "simulation_functions.R"))
+source(here::here("R", "validation_utils.R"))
+source(here::here("R", "calculation.R"))
+source(here::here("R", "extraction.R"))
+source(here::here("R", "simulation.R"))
+source(here::here("R", "orchestration.R"))
+source(here::here("R", "visualisation.R"))
 # ---- Parameters ------------------------------------------------------------
 simulation_errorchoice_defaults <- function() {
   taus_AE <- exp(seq(0, log(1 + 0.02), by = 0.0005)) - 1
