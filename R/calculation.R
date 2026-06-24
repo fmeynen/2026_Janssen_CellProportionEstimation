@@ -30,7 +30,7 @@ compute_errors <- function(phat, p, metrics = c("AE", "ARE"), n = NULL) {
     result[["AE"]] <- abs(phat - p)
   }
   if ("ARE" %in% metrics) {
-    result[["ARE"]] <- abs(phat - p) / p   # NaN when p == 0 and phat == 0; Inf when p == 0 and phat != 0; no stabilisation by design
+    result[["ARE"]] <- abs(phat - p) / p   # ARE: NaN when p == 0 and phat == 0 (0/0); Inf when p == 0 and phat != 0; no stabilisation by design
   }
   if ("TSE" %in% metrics) {
     result[["TSE"]] <- asinh(sqrt(2 * n^2 * (phat - p)^2))

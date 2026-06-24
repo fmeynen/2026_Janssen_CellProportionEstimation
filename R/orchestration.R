@@ -32,9 +32,9 @@
 #' @return List with elements:
 #'   \describe{
 #'     \item{inputs}{All input arguments.}
-#'     \item{p_table}{Data.frame with one row per simulated alpha/p_max combination and one column per index
-#'       (`index_1`, ..., `index_K`) containing the corresponding p values,
-#'       plus a `p_max` column.}
+#'     \item{p_table}{Data.frame with one row per simulated alpha/p_max combination,
+#'       an `alpha` column, a `p_max` column, and one column per index
+#'       (`index_1`, ..., `index_K`) containing the corresponding p values.}
 #'     \item{replicate_summaries}{Tidy data.frame:
 #'       alpha, p_max, replicate, metric, max_error, argmax_index.}
 #'     \item{errors_long}{Tidy data.frame:
