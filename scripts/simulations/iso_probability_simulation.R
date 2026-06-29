@@ -51,6 +51,9 @@ iso_probability_simulation_defaults <- function() {
     tau_ARE_grid = seq(0.10, 0.40, by = 0.10),
     cutoff_grid  = seq(0.05, 0.20, by = 0.05),
 
+    # Summarisation
+    top_k = 10L,
+
     # Reproducibility
     seed = 260926L
   )
@@ -99,7 +102,7 @@ run_iso_probability_simulation <- function(
   )
 
   # Step 3: summarise results
-  summary <- summarize_iso_candidates(iso_result, top_k = 10L)
+  summary <- summarize_iso_candidates(iso_result, top_k = config$top_k)
 
   # Step 4: produce plots
   plots <- list(
