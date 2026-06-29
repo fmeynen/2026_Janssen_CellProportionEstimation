@@ -148,3 +148,80 @@ extract_phat_long <- function(rep_out, alpha_i, p_max_i, B) {
     stringsAsFactors = FALSE
   )
 }
+
+
+# ---------------------------------------------------------------------------
+# Iso-probability pipeline
+# ---------------------------------------------------------------------------
+
+
+#' Summarize iso-search yield, ranges, and closest candidates.
+#'
+#' @param iso_result Output list from `run_iso_success_search()`.
+#' @param top_k      Integer; number of closest-to-baseline candidates to return
+#'   (ranked by smallest `abs_diff_p0`; default 10L).
+#'
+#' @return Named list with elements:
+#'   \describe{
+#'     \item{counts}{One-row data.frame: n_candidates_total, n_pass_screen.}
+#'     \item{ranges}{One-row data.frame: tau_AE_min, tau_AE_max, tau_ARE_min,
+#'       tau_ARE_max, cutoff_min, cutoff_max among passing candidates.
+#'       All columns are NA when no candidates pass.}
+#'     \item{closest}{data.frame of up to top_k rows from screen_results ranked
+#'       by ascending abs_diff_p0: candidate_id, tau_AE, tau_ARE, cutoff,
+#'       p_hat, abs_diff_p0, ci_low, ci_high.}
+#'   }
+summarize_iso_candidates <- function(iso_result, top_k = 10L) {
+  stopifnot(
+    is.list(iso_result),
+    all(c("screen_results", "diagnostics") %in% names(iso_result)),
+    is.data.frame(iso_result$screen_results),
+    is.numeric(top_k), length(top_k) == 1L, top_k >= 1L
+  )
+
+  sr  <- iso_result$screen_results
+  top_k <- as.integer(top_k)
+
+  counts <- data.frame(
+    n_candidates_total = iso_result$diagnostics$n_candidates_total,
+    n_pass_screen      = iso_result$diagnostics$n_pass_screen,
+    stringsAsFactors   = FALSE
+  )
+
+  pass_rows <- sr[sr$pass, , drop = FALSE]
+  if (nrow(pass_rows) == 0L) {
+    ranges <- data.frame(
+      tau_AE_min  = NA_real_,
+      tau_AE_max  = NA_real_,
+      tau_ARE_min = NA_real_,
+      tau_ARE_max = NA_real_,
+      cutoff_min  = NA_real_,
+      cutoff_max  = NA_real_,
+      stringsAsFactors = FALSE
+    )
+  } else {
+    ranges <- data.frame(
+      tau_AE_min  = min(pass_rows$tau_AE),
+      tau_AE_max  = max(pass_rows$tau_AE),
+      tau_ARE_min = min(pass_rows$tau_ARE),
+      tau_ARE_max = max(pass_rows$tau_ARE),
+      cutoff_min  = min(pass_rows$cutoff),
+      cutoff_max  = max(pass_rows$cutoff),
+      stringsAsFactors = FALSE
+    )
+  }
+
+  sr_sorted <- sr[order(sr$abs_diff_p0), , drop = FALSE]
+  k         <- min(top_k, nrow(sr_sorted))
+  closest   <- sr_sorted[seq_len(k),
+                         c("candidate_id", "tau_AE", "tau_ARE", "cutoff",
+                           "p_hat", "abs_diff_p0", "ci_low", "ci_high"),
+                         drop = FALSE]
+  rownames(closest) <- NULL
+
+  list(
+    counts  = counts,
+    ranges  = ranges,
+    closest = closest
+  )
+}

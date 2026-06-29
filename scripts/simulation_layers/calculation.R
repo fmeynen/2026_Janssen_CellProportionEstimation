@@ -248,6 +248,148 @@ find_best_hybrid_cutoff <- function(curve_df,
   )
 }
 
+#' Compute binary joint success for each replicate under the hybrid AE/ARE rule.
+#'
+#' For each replicate b and each cell type k:
+#'   - if `phat_mat[b, k] < cutoff`: evaluate AE = abs(phat - p_k); success iff AE <= tau_AE.
+#'   - if `phat_mat[b, k] >= cutoff`: evaluate ARE = abs(phat - p_k) / p_k; success iff ARE <= tau_ARE.
+#' Replicate b is a success iff every cell type k passes its branch-specific threshold.
+#'
+#' Note: ARE is undefined (NaN/Inf) when p_k == 0; that behavior is intentional.
+#' The boundary `phat == cutoff` always routes to the ARE branch (>= cutoff).
+#'
+#' @param phat_mat B x K numeric matrix of observed/estimated proportions.
+#' @param p        Numeric vector of length K; true proportions.
+#' @param tau_AE   Numeric scalar; AE success threshold (inclusive).
+#' @param tau_ARE  Numeric scalar; ARE success threshold (inclusive).
+#' @param cutoff   Numeric scalar; boundary applied to observed proportions.
+#'
+#' @return Logical vector of length B; TRUE when all K cell types pass.
+compute_joint_success <- function(phat_mat, p, tau_AE, tau_ARE, cutoff) {
+  stopifnot(
+    is.matrix(phat_mat),
+    is.numeric(phat_mat),
+    is.numeric(p),
+    length(p) == ncol(phat_mat),
+    is.numeric(tau_AE),
+    length(tau_AE) == 1L,
+    is.finite(tau_AE),
+    tau_AE >= 0,
+    is.numeric(tau_ARE),
+    length(tau_ARE) == 1L,
+    is.finite(tau_ARE),
+    tau_ARE >= 0,
+    is.numeric(cutoff),
+    length(cutoff) == 1L,
+    is.finite(cutoff)
+  )
+
+  p_mat    <- matrix(p, nrow = nrow(phat_mat), ncol = ncol(phat_mat), byrow = TRUE)
+  ae_mat   <- abs(phat_mat - p_mat)
+  are_mat  <- ae_mat / p_mat           # NaN/Inf when p == 0: intentional
+
+  use_ae     <- phat_mat < cutoff      # TRUE -> AE branch; FALSE (>=) -> ARE branch
+  pass_mat   <- ifelse(use_ae, ae_mat <= tau_AE, are_mat <= tau_ARE)
+
+  rowSums(pass_mat, na.rm = FALSE) == ncol(phat_mat)
+}
+
+
+#' Summarize a Monte Carlo estimate of joint success probability.
+#'
+#' Computes the point estimate, Monte Carlo standard error, and a confidence
+#' interval for the binomial success probability implied by a logical success
+#' vector.
+#'
+#' @param success    Logical vector of length B (TRUE = replicate success).
+#' @param conf_level Numeric scalar in (0, 1); confidence level (default 0.95).
+#' @param ci_method  Character scalar: `"wilson"` (default) or `"jeffreys"`.
+#'
+#' @return Named list with elements:
+#'   \describe{
+#'     \item{n_success}{Integer; number of successes.}
+#'     \item{n_total}{Integer; total replicates.}
+#'     \item{p_hat}{Numeric; estimated success probability.}
+#'     \item{se_mc}{Numeric; Monte Carlo standard error sqrt(p_hat*(1-p_hat)/n_total).}
+#'     \item{ci_low}{Numeric; lower confidence bound.}
+#'     \item{ci_high}{Numeric; upper confidence bound.}
+#'     \item{conf_level}{Numeric; the requested confidence level.}
+#'     \item{ci_method}{Character; the CI method used.}
+#'   }
+summarize_joint_success <- function(success,
+                                    conf_level = 0.95,
+                                    ci_method = c("wilson", "jeffreys")) {
+  ci_method <- match.arg(ci_method)
+  stopifnot(
+    is.logical(success),
+    length(success) >= 1L,
+    is.numeric(conf_level),
+    length(conf_level) == 1L,
+    is.finite(conf_level),
+    conf_level > 0,
+    conf_level < 1
+  )
+
+  n_total   <- length(success)
+  n_success <- sum(success, na.rm = FALSE)
+  p_hat     <- n_success / n_total
+  se_mc     <- sqrt(p_hat * (1 - p_hat) / n_total)
+
+  if (identical(ci_method, "wilson")) {
+    z      <- stats::qnorm((1 + conf_level) / 2)
+    denom  <- 1 + z^2 / n_total
+    center <- (p_hat + z^2 / (2 * n_total)) / denom
+    margin <- z * sqrt(p_hat * (1 - p_hat) / n_total + z^2 / (4 * n_total^2)) / denom
+    ci_low  <- max(0, center - margin)
+    ci_high <- min(1, center + margin)
+  } else {
+    # Jeffreys prior Beta(0.5, 0.5) posterior Beta(n_success + 0.5, n_total - n_success + 0.5)
+    a       <- n_success + 0.5
+    b       <- n_total - n_success + 0.5
+    ci_low  <- stats::qbeta((1 - conf_level) / 2, shape1 = a, shape2 = b)
+    ci_high <- stats::qbeta((1 + conf_level) / 2, shape1 = a, shape2 = b)
+  }
+
+  list(
+    n_success  = as.integer(n_success),
+    n_total    = as.integer(n_total),
+    p_hat      = p_hat,
+    se_mc      = se_mc,
+    ci_low     = ci_low,
+    ci_high    = ci_high,
+    conf_level = conf_level,
+    ci_method  = ci_method
+  )
+}
+
+
+#' Classify whether a candidate probability is equivalent to the baseline.
+#'
+#' Uses the point-estimate rule: pass iff `|p_hat - p0| <= delta`.
+#'
+#' @param p_hat  Numeric scalar; candidate estimated success probability.
+#' @param p0     Numeric scalar; baseline success probability.
+#' @param delta  Numeric scalar >= 0; absolute equivalence tolerance.
+#'
+#' @return Named list with elements:
+#'   \describe{
+#'     \item{abs_diff_p0}{Numeric; absolute difference |p_hat - p0|.}
+#'     \item{pass}{Logical; TRUE iff abs_diff_p0 <= delta.}
+#'   }
+classify_iso_equivalence <- function(p_hat, p0, delta) {
+  stopifnot(
+    is.numeric(p_hat), length(p_hat) == 1L, is.finite(p_hat),
+    is.numeric(p0),    length(p0)    == 1L, is.finite(p0),
+    is.numeric(delta), length(delta) == 1L, is.finite(delta), delta >= 0
+  )
+  abs_diff <- abs(p_hat - p0)
+  list(
+    abs_diff_p0 = abs_diff,
+    pass        = abs_diff <= delta
+  )
+}
+
+
 #' Run hybrid cutoff analysis for one simulation scenario.
 #'
 #' @param phat_mat  B x K numeric matrix of observed proportions.

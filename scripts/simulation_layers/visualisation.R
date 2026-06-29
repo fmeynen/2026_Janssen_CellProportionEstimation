@@ -334,3 +334,201 @@ plot_hybrid_best_cutoff_heatmap <- function(phat_mat, p, cutoffs,
     ) +
     ggplot2::theme_bw()
 }
+
+
+# ---------------------------------------------------------------------------
+# Iso-probability pipeline visualisation
+# ---------------------------------------------------------------------------
+
+
+#' Plot a 2D slice of the iso-probability search by fixing one parameter.
+#'
+#' Selects the nearest available value of the fixed parameter in
+#' `iso_result$screen_results` and produces a tile heatmap of `p_hat` for the
+#' remaining two free parameters, with a separate shape overlay indicating
+#' which candidates pass the equivalence criterion.
+#'
+#' Note: `use_confirm` is accepted for API consistency but is currently ignored
+#' because the pipeline produces screening results only.  A message is emitted
+#' when `use_confirm = TRUE` and no confirmation results are present.
+#'
+#' @param iso_result  Output list from `run_iso_success_search()`.
+#' @param fix         Character scalar: one of `"tau_AE"`, `"tau_ARE"`,
+#'   or `"cutoff"`.  This parameter is fixed to the nearest available value.
+#' @param fix_value   Numeric scalar; the desired value for the fixed parameter.
+#'   The nearest available value in `screen_results` is used.
+#' @param use_confirm Logical; reserved for future confirmation-stage use
+#'   (default TRUE). Currently ignored; screening results are always used.
+#'
+#' @return A ggplot tile plot with fill = p_hat and a point overlay for passing
+#'   candidates.
+plot_iso_slice <- function(iso_result,
+                           fix = c("tau_AE", "tau_ARE", "cutoff"),
+                           fix_value,
+                           use_confirm = TRUE) {
+  fix <- match.arg(fix)
+  stopifnot(
+    is.list(iso_result),
+    "screen_results" %in% names(iso_result),
+    is.data.frame(iso_result$screen_results),
+    is.numeric(fix_value),
+    length(fix_value) == 1L,
+    is.finite(fix_value)
+  )
+
+  if (isTRUE(use_confirm)) {
+    if (is.null(iso_result[["confirm_results"]])) {
+      message("plot_iso_slice: no confirm_results found; using screen_results.")
+    }
+  }
+
+  sr <- iso_result$screen_results
+  required_cols <- c("tau_AE", "tau_ARE", "cutoff", "p_hat", "pass")
+  missing_cols  <- setdiff(required_cols, names(sr))
+  if (length(missing_cols) > 0L) {
+    stop(
+      sprintf("screen_results is missing required columns: %s",
+              paste(missing_cols, collapse = ", ")),
+      call. = FALSE
+    )
+  }
+
+  # Find nearest available value for the fixed parameter.
+  available <- unique(sr[[fix]])
+  nearest   <- available[which.min(abs(available - fix_value))]
+
+  slice_df <- sr[sr[[fix]] == nearest, , drop = FALSE]
+  if (nrow(slice_df) == 0L) {
+    stop("No rows found in screen_results for the nearest fixed parameter value.",
+         call. = FALSE)
+  }
+
+  free_params <- setdiff(c("tau_AE", "tau_ARE", "cutoff"), fix)
+  x_var <- free_params[[1L]]
+  y_var <- free_params[[2L]]
+
+  pass_df <- slice_df[slice_df$pass, , drop = FALSE]
+
+  plt <- ggplot2::ggplot(
+    slice_df,
+    ggplot2::aes(
+      x    = .data[[x_var]],
+      y    = .data[[y_var]],
+      fill = p_hat
+    )
+  ) +
+    ggplot2::geom_tile(color = "grey90", linewidth = 0.3) +
+    ggplot2::scale_fill_gradient(
+      low  = "#FFF7EC",
+      high = "#7F0000",
+      name = "p_hat"
+    ) +
+    ggplot2::labs(
+      x     = x_var,
+      y     = y_var,
+      title = sprintf(
+        "Iso-probability slice: %s = %.4g (nearest)",
+        fix, nearest
+      )
+    ) +
+    ggplot2::theme_bw()
+
+  if (nrow(pass_df) > 0L) {
+    plt <- plt +
+      ggplot2::geom_point(
+        data         = pass_df,
+        ggplot2::aes(x = .data[[x_var]], y = .data[[y_var]]),
+        inherit.aes  = FALSE,
+        shape        = 23L,
+        fill         = "white",
+        color        = "#1A7734",
+        size         = 2.5,
+        stroke       = 0.6
+      )
+  }
+  plt
+}
+
+
+#' Plot candidate success probabilities against the baseline target.
+#'
+#' Produces a point plot of `p_hat` for every screened candidate, ordered by
+#' `candidate_id`, with horizontal reference lines for `p0_hat` (baseline
+#' probability) and the equivalence band `p0_hat +/- delta`.  Passing
+#' candidates are highlighted with a distinct colour.
+#'
+#' Note: `use_confirm` is accepted for API consistency but is currently ignored
+#' because the pipeline produces screening results only.
+#'
+#' @param iso_result  Output list from `run_iso_success_search()`.
+#' @param use_confirm Logical; reserved for future confirmation-stage use
+#'   (default TRUE). Currently ignored.
+#'
+#' @return A ggplot object.
+plot_iso_probability_comparison <- function(iso_result, use_confirm = TRUE) {
+  stopifnot(
+    is.list(iso_result),
+    all(c("screen_results", "baseline", "inputs") %in% names(iso_result)),
+    is.data.frame(iso_result$screen_results),
+    is.data.frame(iso_result$baseline)
+  )
+
+  if (isTRUE(use_confirm)) {
+    if (is.null(iso_result[["confirm_results"]])) {
+      message("plot_iso_probability_comparison: no confirm_results found; using screen_results.")
+    }
+  }
+
+  sr    <- iso_result$screen_results
+  p0    <- iso_result$baseline$p_hat[[1L]]
+  delta <- iso_result$inputs$delta
+
+  required_cols <- c("candidate_id", "p_hat", "pass")
+  missing_cols  <- setdiff(required_cols, names(sr))
+  if (length(missing_cols) > 0L) {
+    stop(
+      sprintf("screen_results is missing required columns: %s",
+              paste(missing_cols, collapse = ", ")),
+      call. = FALSE
+    )
+  }
+
+  sr$status <- ifelse(sr$pass, "pass", "fail")
+
+  ggplot2::ggplot(
+    sr,
+    ggplot2::aes(
+      x     = candidate_id,
+      y     = p_hat,
+      color = status,
+      shape = status
+    )
+  ) +
+    ggplot2::geom_point(size = 1.8, alpha = 0.8) +
+    ggplot2::geom_hline(
+      yintercept = p0,
+      linetype   = "solid",
+      color      = "#1F4E79",
+      linewidth  = 0.8
+    ) +
+    ggplot2::geom_hline(
+      yintercept = c(p0 - delta, p0 + delta),
+      linetype   = "dashed",
+      color      = "#2E86C1",
+      linewidth  = 0.6
+    ) +
+    ggplot2::scale_color_manual(
+      values = c(pass = "#1A7734", fail = "#C0392B"),
+      name   = "Equivalence"
+    ) +
+    ggplot2::scale_shape_manual(
+      values = c(pass = 17L, fail = 16L),
+      name   = "Equivalence"
+    ) +
+    ggplot2::labs(
+      x     = "Candidate ID",
+      y     = "Estimated success probability (p_hat)",
+      title = "Candidate probabilities vs. baseline"
+    ) +
+    ggplot2::theme_bw()
+}

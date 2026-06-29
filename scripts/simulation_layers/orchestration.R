@@ -271,3 +271,234 @@ run_simulation_hybrid_cutoff_experiment <- function(alpha, K, n, B, cutoffs,
     best_cutoff_summary = do.call(rbind, best_summary_list)
   )
 }
+
+
+# ---------------------------------------------------------------------------
+# Iso-probability pipeline
+# ---------------------------------------------------------------------------
+
+
+#' Build a Cartesian candidate design over (tau_AE, tau_ARE, cutoff) grids.
+#'
+#' @param tau_AE_grid  Numeric vector of candidate AE thresholds.
+#' @param tau_ARE_grid Numeric vector of candidate ARE thresholds.
+#' @param cutoff_grid  Numeric vector of candidate cutoffs.
+#'
+#' @return data.frame with columns:
+#'   `candidate_id` (integer), `tau_AE` (numeric), `tau_ARE` (numeric),
+#'   `cutoff` (numeric).
+make_iso_parameter_design <- function(tau_AE_grid, tau_ARE_grid, cutoff_grid) {
+  stopifnot(
+    is.numeric(tau_AE_grid),  length(tau_AE_grid)  >= 1L, all(is.finite(tau_AE_grid)),
+    is.numeric(tau_ARE_grid), length(tau_ARE_grid) >= 1L, all(is.finite(tau_ARE_grid)),
+    is.numeric(cutoff_grid),  length(cutoff_grid)  >= 1L, all(is.finite(cutoff_grid))
+  )
+  design <- expand.grid(
+    tau_AE  = tau_AE_grid,
+    tau_ARE = tau_ARE_grid,
+    cutoff  = cutoff_grid,
+    KEEP.OUT.ATTRS = FALSE,
+    stringsAsFactors = FALSE
+  )
+  design <- design[, c("tau_AE", "tau_ARE", "cutoff"), drop = FALSE]
+  design$candidate_id <- seq_len(nrow(design))
+  design[, c("candidate_id", "tau_AE", "tau_ARE", "cutoff")]
+}
+
+
+#' Run the iso-probability success search over a candidate parameter design.
+#'
+#' Estimates the baseline joint success probability for a fixed baseline triple
+#' (tau_AE, tau_ARE, cutoff), then evaluates all candidate triples in the
+#' design and flags those that are equivalent to the baseline (point rule:
+#' |p_hat - p0_hat| <= delta).
+#'
+#' **Single-scenario constraint**: this function accepts exactly one alpha value
+#' and at most one p_max value so that a single true-proportion vector `p` is
+#' unambiguously defined.  To search over multiple proportion scenarios, call
+#' this function once per scenario and combine results externally.
+#'
+#' @param alpha              Numeric scalar (> 0); Beta shape for proportion generation.
+#' @param K                  Integer; number of cell types (default 10).
+#' @param n                  Integer; total sample size per replicate.
+#' @param baseline_tau_AE    Numeric scalar; baseline AE threshold.
+#' @param baseline_tau_ARE   Numeric scalar; baseline ARE threshold.
+#' @param baseline_cutoff    Numeric scalar; baseline cutoff value.
+#' @param B_baseline         Integer; replicates used to estimate baseline p0.
+#' @param design             data.frame from `make_iso_parameter_design()`.
+#' @param B_screen           Integer; replicates used to evaluate each candidate.
+#' @param delta              Numeric scalar >= 0; absolute equivalence tolerance
+#'   for the point rule `|p_hat - p0_hat| <= delta`.
+#' @param proportion_method  Proportion-generation method (`"beta"` or
+#'   `"fixed_max_beta"`).
+#' @param p_max              Numeric scalar (or NULL); fixed largest proportion
+#'   for `"fixed_max_beta"`.
+#' @param model              Sampling model passed to `run_replicates()`.
+#' @param tie_method         Tie-breaking rule passed to `run_replicates()`.
+#' @param seed               Optional integer seed; if provided, baseline uses
+#'   `seed` and candidate i uses `seed + i`.
+#' @param conf_level         Numeric scalar in (0, 1); CI confidence level.
+#' @param ci_method          Character scalar: `"wilson"` or `"jeffreys"`.
+#' @param ...                Additional arguments forwarded to `run_replicates()`.
+#'
+#' @return Named list with elements:
+#'   \describe{
+#'     \item{inputs}{List of all input arguments.}
+#'     \item{baseline}{One-row data.frame:
+#'       tau_AE, tau_ARE, cutoff, n_success, n_total, p_hat (= p0_hat),
+#'       se_mc, ci_low, ci_high, conf_level, ci_method.}
+#'     \item{screen_results}{data.frame with one row per candidate:
+#'       candidate_id, tau_AE, tau_ARE, cutoff, n_success, n_total,
+#'       p_hat, se_mc, ci_low, ci_high, abs_diff_p0, pass.}
+#'     \item{iso_candidates}{Subset of screen_results where pass == TRUE.}
+#'     \item{diagnostics}{List: n_candidates_total, n_pass_screen, runtime_sec.}
+#'   }
+run_iso_success_search <- function(alpha, K = 10L, n,
+                                   baseline_tau_AE, baseline_tau_ARE, baseline_cutoff,
+                                   B_baseline, design, B_screen,
+                                   delta = 0.01,
+                                   proportion_method = "beta",
+                                   p_max = NULL,
+                                   model = "multinomial",
+                                   tie_method = "random",
+                                   seed = NULL,
+                                   conf_level = 0.95,
+                                   ci_method = c("wilson", "jeffreys"),
+                                   ...) {
+  ci_method <- match.arg(ci_method)
+
+  stopifnot(
+    is.numeric(alpha),  length(alpha) == 1L,  is.finite(alpha),  alpha > 0,
+    is.numeric(K),      length(K) == 1L,      K %% 1 == 0,       K >= 1L,
+    is.numeric(n),      length(n) == 1L,      is.finite(n),      n >= 1L,
+    is.numeric(baseline_tau_AE),   length(baseline_tau_AE)   == 1L, is.finite(baseline_tau_AE),
+    is.numeric(baseline_tau_ARE),  length(baseline_tau_ARE)  == 1L, is.finite(baseline_tau_ARE),
+    is.numeric(baseline_cutoff),   length(baseline_cutoff)   == 1L, is.finite(baseline_cutoff),
+    is.numeric(B_baseline), length(B_baseline) == 1L, B_baseline >= 1L,
+    is.data.frame(design),
+    all(c("candidate_id", "tau_AE", "tau_ARE", "cutoff") %in% names(design)),
+    is.numeric(B_screen), length(B_screen) == 1L, B_screen >= 1L,
+    is.numeric(delta), length(delta) == 1L, is.finite(delta), delta >= 0
+  )
+
+  t_start <- proc.time()[["elapsed"]]
+
+  # Generate a single true-proportion vector for this scenario.
+  p <- generate_proportions(
+    alpha  = alpha,
+    K      = as.integer(K),
+    method = proportion_method,
+    p_max  = p_max
+  )
+
+  # --- Baseline ---
+  seed_baseline <- if (is.null(seed)) NULL else seed
+  rep_baseline  <- run_replicates(
+    p, n, B_baseline,
+    metrics    = c("AE", "ARE"),
+    model      = model,
+    tie_method = tie_method,
+    seed       = seed_baseline,
+    ...
+  )
+  success_baseline <- compute_joint_success(
+    phat_mat = rep_baseline$phat,
+    p        = p,
+    tau_AE   = baseline_tau_AE,
+    tau_ARE  = baseline_tau_ARE,
+    cutoff   = baseline_cutoff
+  )
+  summ_baseline <- summarize_joint_success(success_baseline, conf_level, ci_method)
+
+  baseline_df <- data.frame(
+    tau_AE     = baseline_tau_AE,
+    tau_ARE    = baseline_tau_ARE,
+    cutoff     = baseline_cutoff,
+    n_success  = summ_baseline$n_success,
+    n_total    = summ_baseline$n_total,
+    p_hat      = summ_baseline$p_hat,
+    se_mc      = summ_baseline$se_mc,
+    ci_low     = summ_baseline$ci_low,
+    ci_high    = summ_baseline$ci_high,
+    conf_level = summ_baseline$conf_level,
+    ci_method  = summ_baseline$ci_method,
+    stringsAsFactors = FALSE
+  )
+
+  p0_hat <- summ_baseline$p_hat
+
+  # --- Screen candidates ---
+  n_candidates <- nrow(design)
+  screen_rows  <- vector("list", n_candidates)
+
+  for (i in seq_len(n_candidates)) {
+    seed_i <- if (is.null(seed)) NULL else seed + i
+    rep_i  <- run_replicates(
+      p, n, B_screen,
+      metrics    = c("AE", "ARE"),
+      model      = model,
+      tie_method = tie_method,
+      seed       = seed_i,
+      ...
+    )
+    success_i <- compute_joint_success(
+      phat_mat = rep_i$phat,
+      p        = p,
+      tau_AE   = design$tau_AE[[i]],
+      tau_ARE  = design$tau_ARE[[i]],
+      cutoff   = design$cutoff[[i]]
+    )
+    summ_i    <- summarize_joint_success(success_i, conf_level, ci_method)
+    equiv_i   <- classify_iso_equivalence(summ_i$p_hat, p0_hat, delta)
+
+    screen_rows[[i]] <- data.frame(
+      candidate_id = design$candidate_id[[i]],
+      tau_AE       = design$tau_AE[[i]],
+      tau_ARE      = design$tau_ARE[[i]],
+      cutoff       = design$cutoff[[i]],
+      n_success    = summ_i$n_success,
+      n_total      = summ_i$n_total,
+      p_hat        = summ_i$p_hat,
+      se_mc        = summ_i$se_mc,
+      ci_low       = summ_i$ci_low,
+      ci_high      = summ_i$ci_high,
+      abs_diff_p0  = equiv_i$abs_diff_p0,
+      pass         = equiv_i$pass,
+      stringsAsFactors = FALSE
+    )
+  }
+
+  screen_results <- do.call(rbind, screen_rows)
+  iso_candidates <- screen_results[screen_results$pass, , drop = FALSE]
+
+  runtime_sec <- proc.time()[["elapsed"]] - t_start
+
+  list(
+    inputs = list(
+      alpha             = alpha,
+      K                 = K,
+      n                 = n,
+      baseline_tau_AE   = baseline_tau_AE,
+      baseline_tau_ARE  = baseline_tau_ARE,
+      baseline_cutoff   = baseline_cutoff,
+      B_baseline        = B_baseline,
+      B_screen          = B_screen,
+      delta             = delta,
+      proportion_method = proportion_method,
+      p_max             = p_max,
+      model             = model,
+      tie_method        = tie_method,
+      seed              = seed,
+      conf_level        = conf_level,
+      ci_method         = ci_method
+    ),
+    baseline       = baseline_df,
+    screen_results = screen_results,
+    iso_candidates = iso_candidates,
+    diagnostics    = list(
+      n_candidates_total = n_candidates,
+      n_pass_screen      = sum(screen_results$pass),
+      runtime_sec        = runtime_sec
+    )
+  )
+}
