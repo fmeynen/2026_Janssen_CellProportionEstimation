@@ -341,6 +341,12 @@ make_iso_parameter_design <- function(tau_AE_grid, tau_ARE_grid, cutoff_grid) {
 #' @param ci_method          Character scalar: `"wilson"` or `"jeffreys"`.
 #' @param ...                Additional arguments forwarded to `run_replicates()`.
 #'
+#' @details
+#' Runtime scales as O(nrow(design) * B_screen) replicates plus O(B_baseline)
+#' for the baseline.  For a grid of G candidates with B_screen replicates each,
+#' total replicates simulated is B_baseline + G * B_screen.  Keep grid sizes
+#' manageable (e.g., a few hundred candidates) to avoid long runtimes.
+#'
 #' @return Named list with elements:
 #'   \describe{
 #'     \item{inputs}{List of all input arguments.}

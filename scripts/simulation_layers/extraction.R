@@ -168,7 +168,11 @@ extract_phat_long <- function(rep_out, alpha_i, p_max_i, B) {
 #'       tau_ARE_max, cutoff_min, cutoff_max among passing candidates.
 #'       All columns are NA when no candidates pass.}
 #'     \item{closest}{data.frame of up to top_k rows from screen_results ranked
-#'       by ascending abs_diff_p0: candidate_id, tau_AE, tau_ARE, cutoff,
+#'       by ascending abs_diff_p0 across all candidates (both passing and
+#'       failing).  This is intentional: showing the nearest candidates
+#'       regardless of pass status is useful for diagnosing near-misses and
+#'       understanding the landscape around the baseline.
+#'       Columns: candidate_id, tau_AE, tau_ARE, cutoff,
 #'       p_hat, abs_diff_p0, ci_low, ci_high.}
 #'   }
 summarize_iso_candidates <- function(iso_result, top_k = 10L) {

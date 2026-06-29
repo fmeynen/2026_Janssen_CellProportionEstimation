@@ -255,11 +255,15 @@ find_best_hybrid_cutoff <- function(curve_df,
 #'   - if `phat_mat[b, k] >= cutoff`: evaluate ARE = abs(phat - p_k) / p_k; success iff ARE <= tau_ARE.
 #' Replicate b is a success iff every cell type k passes its branch-specific threshold.
 #'
-#' Note: ARE is undefined (NaN/Inf) when p_k == 0; that behavior is intentional.
+#' All true proportions `p` must be strictly positive.  This prevents division
+#' by zero in the ARE branch and is consistent with the proportion generators in
+#' this package (see `generate_proportions()`).  When `p_k` is very small but
+#' nonzero, ARE can be large, causing the cell to fail the ARE threshold; this
+#' behaviour is intentional (no stabilisation is applied).
 #' The boundary `phat == cutoff` always routes to the ARE branch (>= cutoff).
 #'
 #' @param phat_mat B x K numeric matrix of observed/estimated proportions.
-#' @param p        Numeric vector of length K; true proportions.
+#' @param p        Numeric vector of length K; true proportions (all must be > 0).
 #' @param tau_AE   Numeric scalar; AE success threshold (inclusive).
 #' @param tau_ARE  Numeric scalar; ARE success threshold (inclusive).
 #' @param cutoff   Numeric scalar; boundary applied to observed proportions.
@@ -271,6 +275,8 @@ compute_joint_success <- function(phat_mat, p, tau_AE, tau_ARE, cutoff) {
     is.numeric(phat_mat),
     is.numeric(p),
     length(p) == ncol(phat_mat),
+    all(is.finite(p)),
+    all(p > 0),
     is.numeric(tau_AE),
     length(tau_AE) == 1L,
     is.finite(tau_AE),
