@@ -621,7 +621,7 @@ if (requireNamespace("mgcv", quietly = TRUE) && requireNamespace("lhs", quietly 
     R_final = 15L,
     n_candidates = 200L
   )
-  if (!all(c("design_history", "final_band_points", "final_model", "round_summaries") %in% names(isoband_smoke))) {
+  if (!all(c("design_history", "final_band_points", "final_band_points_unrefined", "final_model", "round_summaries") %in% names(isoband_smoke))) {
     stop("run_isoband_pipeline should return expected core fields")
   }
   if (nrow(isoband_smoke$final_band_points_unrefined) > 0L &&

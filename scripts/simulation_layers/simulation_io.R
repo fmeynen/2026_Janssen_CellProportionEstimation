@@ -58,7 +58,7 @@ isoband_result_path <- function(config, dir, name = "simulation_isoband") {
 #' @param dir Directory for output files.
 #' @param name Prefix for file names.
 #'
-#' @return Invisibility returns the saved file path.
+#' @return Invisibly returns the saved file path.
 save_isoband_result <- function(result, config, dir, name = "simulation_isoband") {
   out_path <- isoband_result_path(config = config, dir = dir, name = name)
   saveRDS(result, out_path)

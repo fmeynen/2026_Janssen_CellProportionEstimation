@@ -443,6 +443,9 @@ propose_isoband_adaptive_points <- function(design_results_df, ranges, p0, n_add
   }
 
   gam_fit <- fit_isoband_gam(design_results_df = design_results_df)
+  if (!isTRUE(gam_fit$converged)) {
+    stop("fit_isoband_gam did not converge for adaptive proposal step.", call. = FALSE)
+  }
   candidates_df <- generate_isoband_candidate_pool(
     ranges = ranges,
     n_candidates = n_candidates,
@@ -681,6 +684,9 @@ run_isoband_pipeline <- function(alpha, p0, ranges, eps, seed = NULL, n,
   }
 
   final_gam_fit <- fit_isoband_gam(design_results_df = design_history)
+  if (!isTRUE(final_gam_fit$converged)) {
+    stop("fit_isoband_gam did not converge on final design history.", call. = FALSE)
+  }
   dense_candidates <- generate_isoband_candidate_pool(
     ranges = ranges,
     n_candidates = n_candidates,
