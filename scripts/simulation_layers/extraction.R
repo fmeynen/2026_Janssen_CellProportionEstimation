@@ -148,3 +148,61 @@ extract_phat_long <- function(rep_out, alpha_i, p_max_i, B) {
     stringsAsFactors = FALSE
   )
 }
+
+#' Validate and normalize isoband triad ranges.
+#'
+#' @param ranges Named list with numeric length-2 vectors:
+#'   `tau_AE`, `tau_ARE`, and `cutoff`.
+#'
+#' @return Normalized list with elements `tau_AE`, `tau_ARE`, and `cutoff`.
+validate_isoband_ranges <- function(ranges) {
+  required <- c("tau_AE", "tau_ARE", "cutoff")
+  if (!is.list(ranges) || !all(required %in% names(ranges))) {
+    stop(
+      sprintf("ranges must be a named list containing: %s", paste(required, collapse = ", ")),
+      call. = FALSE
+    )
+  }
+
+  normalize_pair <- function(x, name) {
+    if (!is.numeric(x) || length(x) != 2L || any(!is.finite(x))) {
+      stop(sprintf("ranges$%s must be a numeric length-2 finite vector.", name), call. = FALSE)
+    }
+    x <- as.numeric(x)
+    if (!(x[[1L]] < x[[2L]])) {
+      stop(sprintf("ranges$%s must be strictly increasing.", name), call. = FALSE)
+    }
+    x
+  }
+
+  tau_AE <- normalize_pair(ranges$tau_AE, "tau_AE")
+  tau_ARE <- normalize_pair(ranges$tau_ARE, "tau_ARE")
+  cutoff <- normalize_pair(ranges$cutoff, "cutoff")
+
+  if (!(tau_AE[[1L]] > 0 && tau_AE[[2L]] < 1)) {
+    stop("tau_AE range must satisfy 0 < min < max < 1.", call. = FALSE)
+  }
+  if (!(tau_ARE[[1L]] > 0 && is.finite(tau_ARE[[2L]]) && tau_ARE[[2L]] < Inf)) {
+    stop("tau_ARE range must satisfy 0 < min < max < Inf with finite bounds.", call. = FALSE)
+  }
+  if (!(cutoff[[1L]] > 0 && cutoff[[2L]] < 1)) {
+    stop("cutoff range must satisfy 0 < min < max < 1.", call. = FALSE)
+  }
+
+  list(tau_AE = tau_AE, tau_ARE = tau_ARE, cutoff = cutoff)
+}
+
+#' Create an empty isoband result container.
+#'
+#' @param inputs Optional list of pipeline inputs.
+#'
+#' @return Standardized list skeleton for isoband outputs.
+new_isoband_result_container <- function(inputs = NULL) {
+  list(
+    design_history = data.frame(),
+    round_summaries = data.frame(),
+    final_band_points = data.frame(),
+    final_model = NULL,
+    inputs = inputs
+  )
+}

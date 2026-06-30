@@ -334,3 +334,48 @@ plot_hybrid_best_cutoff_heatmap <- function(phat_mat, p, cutoffs,
     ) +
     ggplot2::theme_bw()
 }
+
+#' Plot isoband point-cloud output for quality control.
+#'
+#' @param isoband_result Output list from `run_isoband_pipeline()`.
+#' @param color_by Column used for point color:
+#'   `"p_hat"`, `"success_rate"`, or `"delta"`.
+#'
+#' @return A ggplot object.
+plot_isoband_point_cloud <- function(isoband_result,
+                                     color_by = c("p_hat", "success_rate", "delta")) {
+  color_by <- match.arg(color_by)
+  if (!is.list(isoband_result) || !("final_band_points" %in% names(isoband_result))) {
+    stop("isoband_result must be a list containing final_band_points.", call. = FALSE)
+  }
+  df <- isoband_result$final_band_points
+  required_cols <- c("tau_AE", "tau_ARE", "cutoff")
+  if (!is.data.frame(df) || !all(required_cols %in% names(df))) {
+    stop("final_band_points must be a data.frame with tau_AE, tau_ARE, and cutoff.", call. = FALSE)
+  }
+  if (nrow(df) == 0L) {
+    stop("final_band_points is empty; nothing to plot.", call. = FALSE)
+  }
+
+  resolved_color_col <- switch(
+    color_by,
+    p_hat = "p_hat",
+    delta = "delta",
+    success_rate = if ("success_rate_refined" %in% names(df)) "success_rate_refined" else "success_rate"
+  )
+  if (!(resolved_color_col %in% names(df))) {
+    stop(sprintf("Requested color_by '%s' is not available in final_band_points.", color_by), call. = FALSE)
+  }
+
+  df$.color_value <- df[[resolved_color_col]]
+  ggplot2::ggplot(df, ggplot2::aes(x = tau_AE, y = tau_ARE, color = .color_value, size = cutoff)) +
+    ggplot2::geom_point(alpha = 0.75) +
+    ggplot2::theme_bw() +
+    ggplot2::labs(
+      x = "tau_AE",
+      y = "tau_ARE",
+      color = color_by,
+      size = "cutoff",
+      title = "Isoband point cloud"
+    )
+}

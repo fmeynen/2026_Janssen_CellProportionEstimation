@@ -155,6 +155,52 @@ evaluate_hybrid_success_cell_level <- function(phat_mat, p, cutoff, tau_AE, tau_
   )
 }
 
+#' Evaluate hybrid AE/ARE success at the cell-type level with strict cutoff split.
+#'
+#' Uses the strict rule requested for isoband automation:
+#' values with `obs < cutoff` are checked against `tau_AE`,
+#' and values with `obs >= cutoff` are checked against `tau_ARE`.
+#'
+#' @param phat_mat B x K numeric matrix of observed proportions.
+#' @param p        True proportion vector of length K.
+#' @param cutoff   Numeric scalar cutoff on observed proportions.
+#' @param tau_AE   Numeric scalar AE success threshold.
+#' @param tau_ARE  Numeric scalar ARE success threshold.
+#'
+#' @return List with the same structure as `evaluate_hybrid_success_cell_level()`.
+evaluate_hybrid_success_cell_level_strict <- function(phat_mat, p, cutoff, tau_AE, tau_ARE) {
+  stopifnot(
+    is.matrix(phat_mat),
+    is.numeric(phat_mat),
+    is.numeric(p),
+    length(p) == ncol(phat_mat),
+    all(is.finite(p)),
+    all(p > 0),
+    is.numeric(cutoff),
+    length(cutoff) == 1L,
+    is.finite(cutoff),
+    is.numeric(tau_AE),
+    length(tau_AE) == 1L,
+    is.finite(tau_AE),
+    is.numeric(tau_ARE),
+    length(tau_ARE) == 1L,
+    is.finite(tau_ARE)
+  )
+
+  p_mat <- matrix(p, nrow = nrow(phat_mat), ncol = ncol(phat_mat), byrow = TRUE)
+  ae_mat <- abs(phat_mat - p_mat)
+  are_mat <- ae_mat / p_mat
+  use_AE_matrix <- phat_mat < cutoff
+  success_matrix <- ifelse(use_AE_matrix, ae_mat <= tau_AE, are_mat <= tau_ARE)
+
+  list(
+    success_matrix = success_matrix,
+    use_AE_matrix = use_AE_matrix,
+    success_rate_cell = mean(success_matrix, na.rm = TRUE),
+    success_rate_replicate = mean(rowSums(success_matrix, na.rm = TRUE) == ncol(success_matrix))
+  )
+}
+
 #' Sweep hybrid AE/ARE cutoffs and summarize success rates.
 #'
 #' @param phat_mat B x K numeric matrix of observed proportions.
@@ -299,4 +345,127 @@ run_hybrid_cutoff_analysis <- function(phat_mat, p, cutoffs, tau_AE, tau_ARE,
     cutoff_curve = cutoff_curve,
     best_summary = best_summary
   )
+}
+
+#' Fit hard-coded isoband GAM surrogate for replicate-level success.
+#'
+#' @param design_results_df Data frame containing:
+#'   `tau_AE`, `tau_ARE`, `cutoff`, `n_success`, and `n_total`.
+#'
+#' @return List with elements `model`, `fit_data`, and `converged`.
+fit_isoband_gam <- function(design_results_df) {
+  required_cols <- c("tau_AE", "tau_ARE", "cutoff", "n_success", "n_total")
+  if (!is.data.frame(design_results_df) || !all(required_cols %in% names(design_results_df))) {
+    stop(
+      sprintf("design_results_df must contain columns: %s", paste(required_cols, collapse = ", ")),
+      call. = FALSE
+    )
+  }
+  if (nrow(design_results_df) == 0L) {
+    stop("design_results_df must contain at least one row.", call. = FALSE)
+  }
+
+  fit_data <- design_results_df[, required_cols, drop = FALSE]
+  if (any(!is.finite(as.matrix(fit_data)))) {
+    stop("design_results_df contains non-finite values in required columns.", call. = FALSE)
+  }
+  if (any(fit_data$n_total <= 0) || any(fit_data$n_success < 0) || any(fit_data$n_success > fit_data$n_total)) {
+    stop("n_success and n_total must satisfy 0 <= n_success <= n_total and n_total > 0.", call. = FALSE)
+  }
+
+  gam_model <- mgcv::gam(
+    cbind(n_success, n_total - n_success) ~ mgcv::te(tau_AE, tau_ARE, cutoff, k = c(10, 10, 10)),
+    family = stats::binomial(link = "logit"),
+    method = "REML",
+    data = fit_data
+  )
+  converged <- isTRUE(gam_model$converged)
+  if (!converged && !is.null(gam_model$outer.info$converged)) {
+    converged <- isTRUE(gam_model$outer.info$converged)
+  }
+
+  list(model = gam_model, fit_data = fit_data, converged = converged)
+}
+
+#' Predict isoband GAM surrogate values for candidate triads.
+#'
+#' @param gam_fit Output list from `fit_isoband_gam()` or a `gam` model object.
+#' @param newdata Data frame containing `tau_AE`, `tau_ARE`, and `cutoff`.
+#' @param se_fit  Logical; whether to include standard error on link scale.
+#'
+#' @return Data frame containing `newdata`, `p_hat`, and optional `se_link`.
+predict_isoband_gam <- function(gam_fit, newdata, se_fit = TRUE) {
+  required_cols <- c("tau_AE", "tau_ARE", "cutoff")
+  if (!is.data.frame(newdata) || !all(required_cols %in% names(newdata))) {
+    stop(
+      sprintf("newdata must contain columns: %s", paste(required_cols, collapse = ", ")),
+      call. = FALSE
+    )
+  }
+  if (nrow(newdata) == 0L) {
+    out <- newdata
+    out$p_hat <- numeric(0L)
+    if (isTRUE(se_fit)) out$se_link <- numeric(0L)
+    return(out)
+  }
+
+  model <- if (inherits(gam_fit, "gam")) gam_fit else gam_fit$model
+  if (is.null(model) || !inherits(model, "gam")) {
+    stop("gam_fit must be a gam model or the output list from fit_isoband_gam().", call. = FALSE)
+  }
+
+  pred <- stats::predict(model, newdata = newdata, type = "link", se.fit = isTRUE(se_fit))
+  if (isTRUE(se_fit)) {
+    out <- newdata
+    out$p_hat <- stats::plogis(as.numeric(pred$fit))
+    out$se_link <- as.numeric(pred$se.fit)
+    return(out)
+  }
+
+  out <- newdata
+  out$p_hat <- stats::plogis(as.numeric(pred))
+  out
+}
+
+#' Extract point-cloud isoband from surrogate predictions.
+#'
+#' @param pred_df Prediction data frame containing at least `p_hat`.
+#' @param p0      Target success probability in (0, 1).
+#' @param eps     Tolerance around `p0`.
+#'
+#' @return Filtered data frame with added `delta = abs(p_hat - p0)`.
+extract_isoband_points <- function(pred_df, p0, eps) {
+  if (!is.data.frame(pred_df) || !("p_hat" %in% names(pred_df))) {
+    stop("pred_df must be a data.frame containing a p_hat column.", call. = FALSE)
+  }
+  if (!is.numeric(p0) || length(p0) != 1L || !is.finite(p0) || p0 <= 0 || p0 >= 1) {
+    stop("p0 must be a finite scalar strictly between 0 and 1.", call. = FALSE)
+  }
+  if (!is.numeric(eps) || length(eps) != 1L || !is.finite(eps) || eps <= 0) {
+    stop("eps must be a finite positive scalar.", call. = FALSE)
+  }
+
+  out <- pred_df
+  out$delta <- abs(out$p_hat - p0)
+  out[out$delta <= eps, , drop = FALSE]
+}
+
+#' Score candidate triads for adaptive isoband sampling.
+#'
+#' @param pred_df Data frame containing `p_hat` and optional `se_link`.
+#' @param p0      Target success probability in (0, 1).
+#'
+#' @return Input data frame with `score_primary` and `score_secondary`.
+score_candidates_isoband <- function(pred_df, p0) {
+  if (!is.data.frame(pred_df) || !("p_hat" %in% names(pred_df))) {
+    stop("pred_df must be a data.frame containing a p_hat column.", call. = FALSE)
+  }
+  if (!is.numeric(p0) || length(p0) != 1L || !is.finite(p0) || p0 <= 0 || p0 >= 1) {
+    stop("p0 must be a finite scalar strictly between 0 and 1.", call. = FALSE)
+  }
+
+  out <- pred_df
+  out$score_primary <- abs(out$p_hat - p0)
+  out$score_secondary <- if ("se_link" %in% names(out)) -out$se_link else 0
+  out
 }
