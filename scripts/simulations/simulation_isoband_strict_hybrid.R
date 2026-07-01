@@ -17,7 +17,7 @@ simulation_isoband_strict_defaults <- function() {
       cutoff = c(0.02, 0.20)
     ),
     eps = 0.10,
-    seed = 260926L,
+    seed = 260925L,
     n = 200L,
     K = 5L,
     proportion_method = "beta",
