@@ -29,7 +29,9 @@ simulation_isoband_strict_defaults <- function() {
     n_add = 8L,
     R_final = 30L,
     n_candidates = 500L,
+    # Replicate count used for single-point p0 calibration.
     calibration_B = 5000L,
+    # Seed for reproducible p0 calibration.
     calibration_seed = 270001L
   )
 }
@@ -93,6 +95,11 @@ calibrate_isoband_p0 <- function(config,
     model = config$model,
     seed = config$calibration_seed
   )
+  if (!is.data.frame(calibration_result) ||
+      !("success_rate" %in% names(calibration_result)) ||
+      nrow(calibration_result) < 1L) {
+    stop("Calibration failed: expected non-empty calibration result with success_rate.", call. = FALSE)
+  }
 
   p0_calibrated <- calibration_result$success_rate[[1L]]
   out <- list(
@@ -114,16 +121,17 @@ run_simulation_isoband_strict <- function(config = simulation_isoband_strict_def
                                           cache = TRUE,
                                           force_recompute = FALSE,
                                           cache_dir = here::here("results", "simresults")) {
-  config$ranges <- validate_isoband_ranges(config$ranges)
+  config_local <- config
+  config_local$ranges <- validate_isoband_ranges(config_local$ranges)
 
   calibration_info <- NULL
-  if (is.null(config$p0)) {
-    calibration_info <- calibrate_isoband_p0(config = config, cache = cache, force_recompute = force_recompute)
-    config$p0 <- calibration_info$p0
+  if (is.null(config_local$p0)) {
+    calibration_info <- calibrate_isoband_p0(config = config_local, cache = cache, force_recompute = force_recompute)
+    config_local$p0 <- calibration_info$p0
   }
 
   result_file <- isoband_result_path(
-    config = config,
+    config = config_local,
     dir = cache_dir,
     name = "simulation_isoband_strict_hybrid"
   )
@@ -133,28 +141,28 @@ run_simulation_isoband_strict <- function(config = simulation_isoband_strict_def
   }
 
   result <- run_isoband_pipeline(
-    alpha = config$alpha,
-    p0 = config$p0,
-    ranges = config$ranges,
-    eps = config$eps,
-    seed = config$seed,
-    n = config$n,
-    K = config$K,
-    proportion_method = config$proportion_method,
-    p_max = config$p_max,
-    model = config$model,
-    n_init = config$n_init,
-    R_init = config$R_init,
-    n_rounds_max = config$n_rounds_max,
-    n_add = config$n_add,
-    R_final = config$R_final,
-    n_candidates = config$n_candidates
+    alpha = config_local$alpha,
+    p0 = config_local$p0,
+    ranges = config_local$ranges,
+    eps = config_local$eps,
+    seed = config_local$seed,
+    n = config_local$n,
+    K = config_local$K,
+    proportion_method = config_local$proportion_method,
+    p_max = config_local$p_max,
+    model = config_local$model,
+    n_init = config_local$n_init,
+    R_init = config_local$R_init,
+    n_rounds_max = config_local$n_rounds_max,
+    n_add = config_local$n_add,
+    R_final = config_local$R_final,
+    n_candidates = config_local$n_candidates
   )
 
   if (cache) {
     save_isoband_result(
       result = result,
-      config = config,
+      config = config_local,
       dir = cache_dir,
       name = "simulation_isoband_strict_hybrid"
     )
