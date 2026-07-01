@@ -29,6 +29,7 @@ simulation_isoband_strict_defaults <- function() {
     n_add = 8L,
     R_final = 30L,
     n_candidates = 500L,
+    calibration_point = NULL,
     # High replicate count for stable single-point p0 calibration (still user-configurable).
     calibration_B = 5000L,
     # Fixed default seed for reproducible calibration draws (arbitrary, user-configurable).
@@ -36,17 +37,43 @@ simulation_isoband_strict_defaults <- function() {
   )
 }
 
-compute_isoband_midpoint <- function(ranges) {
+validate_isoband_calibration_point <- function(point, ranges) {
   ranges <- validate_isoband_ranges(ranges)
-  list(
-    tau_AE = mean(ranges$tau_AE),
-    tau_ARE = mean(ranges$tau_ARE),
-    cutoff = mean(ranges$cutoff)
-  )
+  required <- c("tau_AE", "tau_ARE", "cutoff")
+  if (!is.list(point) || !all(required %in% names(point))) {
+    stop(
+      sprintf("calibration_point must be a named list containing: %s", paste(required, collapse = ", ")),
+      call. = FALSE
+    )
+  }
+
+  point <- lapply(required, function(name) {
+    value <- point[[name]]
+    if (!is.numeric(value) || length(value) != 1L || !is.finite(value)) {
+      stop(sprintf("calibration_point$%s must be a finite numeric scalar.", name), call. = FALSE)
+    }
+    as.numeric(value)
+  })
+  names(point) <- required
+
+  in_range <- function(value, bounds) {
+    value >= bounds[[1L]] && value <= bounds[[2L]]
+  }
+  if (!in_range(point$tau_AE, ranges$tau_AE)) {
+    stop("calibration_point$tau_AE must lie within ranges$tau_AE.", call. = FALSE)
+  }
+  if (!in_range(point$tau_ARE, ranges$tau_ARE)) {
+    stop("calibration_point$tau_ARE must lie within ranges$tau_ARE.", call. = FALSE)
+  }
+  if (!in_range(point$cutoff, ranges$cutoff)) {
+    stop("calibration_point$cutoff must lie within ranges$cutoff.", call. = FALSE)
+  }
+
+  point
 }
 
 compute_isoband_calibration_scenario_hash <- function(config) {
-  midpoint <- compute_isoband_midpoint(config$ranges)
+  calibration_point <- validate_isoband_calibration_point(config$calibration_point, config$ranges)
   scenario <- list(
     alpha = config$alpha,
     n = config$n,
@@ -55,7 +82,7 @@ compute_isoband_calibration_scenario_hash <- function(config) {
     p_max = config$p_max,
     model = config$model,
     ranges = validate_isoband_ranges(config$ranges),
-    calibration_point = midpoint
+    calibration_point = calibration_point
   )
   hash_config(scenario)
 }
@@ -78,7 +105,7 @@ calibrate_isoband_p0 <- function(config,
                                  force_recompute = FALSE,
                                  cache_dir = here::here("results", "calibrated_p")) {
   ranges <- validate_isoband_ranges(config$ranges)
-  midpoint <- compute_isoband_midpoint(ranges)
+  calibration_point <- validate_isoband_calibration_point(config$calibration_point, ranges)
   cache_file <- isoband_calibrated_p0_path(config = config, dir = cache_dir)
 
   if (cache && !force_recompute && file.exists(cache_file)) {
@@ -86,9 +113,9 @@ calibrate_isoband_p0 <- function(config,
   }
 
   calibration_design <- data.frame(
-    tau_AE = midpoint$tau_AE,
-    tau_ARE = midpoint$tau_ARE,
-    cutoff = midpoint$cutoff,
+    tau_AE = calibration_point$tau_AE,
+    tau_ARE = calibration_point$tau_ARE,
+    cutoff = calibration_point$cutoff,
     stringsAsFactors = FALSE
   )
   calibration_result <- simulate_isoband_design_points(
@@ -114,7 +141,7 @@ calibrate_isoband_p0 <- function(config,
     p0 = p0_calibrated,
     n_success = calibration_result$n_success[[1L]],
     n_total = calibration_result$n_total[[1L]],
-    calibration_point = midpoint,
+    calibration_point = calibration_point,
     scenario_hash = compute_isoband_calibration_scenario_hash(config)
   )
 
@@ -134,6 +161,9 @@ run_simulation_isoband_strict <- function(config = simulation_isoband_strict_def
 
   calibration_info <- NULL
   if (is.null(config_local$p0)) {
+    if (is.null(config_local$calibration_point)) {
+      stop("config$calibration_point must be provided when config$p0 is NULL.", call. = FALSE)
+    }
     calibration_info <- calibrate_isoband_p0(config = config_local, cache = cache, force_recompute = force_recompute)
     config_local$p0 <- calibration_info$p0
   }
