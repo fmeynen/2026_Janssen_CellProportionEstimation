@@ -102,6 +102,10 @@ calibrate_isoband_p0 <- function(config,
   }
 
   p0_calibrated <- calibration_result$success_rate[[1L]]
+  if (!is.numeric(p0_calibrated) || length(p0_calibrated) != 1L || !is.finite(p0_calibrated) ||
+      p0_calibrated < 0 || p0_calibrated > 1) {
+    stop("Calibration failed: calibrated p0 must be a finite value in [0, 1].", call. = FALSE)
+  }
   out <- list(
     p0 = p0_calibrated,
     n_success = calibration_result$n_success[[1L]],
@@ -128,6 +132,10 @@ run_simulation_isoband_strict <- function(config = simulation_isoband_strict_def
   if (is.null(config_local$p0)) {
     calibration_info <- calibrate_isoband_p0(config = config_local, cache = cache, force_recompute = force_recompute)
     config_local$p0 <- calibration_info$p0
+  }
+  if (!is.numeric(config_local$p0) || length(config_local$p0) != 1L || !is.finite(config_local$p0) ||
+      config_local$p0 <= 0 || config_local$p0 >= 1) {
+    stop("p0 must be a finite scalar strictly between 0 and 1 after calibration/manual assignment.", call. = FALSE)
   }
 
   result_file <- isoband_result_path(
