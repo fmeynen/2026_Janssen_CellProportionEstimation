@@ -374,7 +374,7 @@ fit_isoband_gam <- function(design_results_df) {
   }
 
   gam_model <- mgcv::gam(
-    cbind(n_success, n_total - n_success) ~ mgcv::te(tau_AE, tau_ARE, cutoff, k = c(10, 10, 10)),
+    cbind(n_success, n_total - n_success) ~ te(tau_AE, tau_ARE, cutoff, k = c(10, 10, 10)),
     family = stats::binomial(link = "logit"),
     method = "REML",
     data = fit_data
