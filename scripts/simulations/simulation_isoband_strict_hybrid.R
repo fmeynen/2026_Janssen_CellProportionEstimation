@@ -47,29 +47,32 @@ validate_isoband_calibration_point <- function(point, ranges) {
     )
   }
 
-  point <- lapply(required, function(name) {
+  validated_point <- lapply(required, function(name) {
     value <- point[[name]]
     if (!is.numeric(value) || length(value) != 1L || !is.finite(value)) {
-      stop(sprintf("calibration_point$%s must be a finite numeric scalar.", name), call. = FALSE)
+      stop(
+        sprintf("calibration_point$%s must be numeric, length 1, and finite.", name),
+        call. = FALSE
+      )
     }
     as.numeric(value)
   })
-  names(point) <- required
+  names(validated_point) <- required
 
   in_range <- function(value, bounds) {
     value >= bounds[[1L]] && value <= bounds[[2L]]
   }
-  if (!in_range(point$tau_AE, ranges$tau_AE)) {
+  if (!in_range(validated_point$tau_AE, ranges$tau_AE)) {
     stop("calibration_point$tau_AE must lie within ranges$tau_AE.", call. = FALSE)
   }
-  if (!in_range(point$tau_ARE, ranges$tau_ARE)) {
+  if (!in_range(validated_point$tau_ARE, ranges$tau_ARE)) {
     stop("calibration_point$tau_ARE must lie within ranges$tau_ARE.", call. = FALSE)
   }
-  if (!in_range(point$cutoff, ranges$cutoff)) {
+  if (!in_range(validated_point$cutoff, ranges$cutoff)) {
     stop("calibration_point$cutoff must lie within ranges$cutoff.", call. = FALSE)
   }
 
-  point
+  validated_point
 }
 
 compute_isoband_calibration_scenario_hash <- function(config) {
