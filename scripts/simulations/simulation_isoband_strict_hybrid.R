@@ -66,6 +66,13 @@ isoband_calibrated_p0_path <- function(config, dir = here::here("results", "cali
   file.path(dir, paste0("p0_", scenario_hash, ".rds"))
 }
 
+validate_open_probability <- function(value, label = "p0") {
+  if (!is.numeric(value) || length(value) != 1L || !is.finite(value) ||
+      value <= 0 || value >= 1) {
+    stop(sprintf("%s must be a finite scalar strictly between 0 and 1.", label), call. = FALSE)
+  }
+}
+
 calibrate_isoband_p0 <- function(config,
                                  cache = TRUE,
                                  force_recompute = FALSE,
@@ -102,10 +109,7 @@ calibrate_isoband_p0 <- function(config,
   }
 
   p0_calibrated <- calibration_result$success_rate[[1L]]
-  if (!is.numeric(p0_calibrated) || length(p0_calibrated) != 1L || !is.finite(p0_calibrated) ||
-      p0_calibrated < 0 || p0_calibrated > 1) {
-    stop("Calibration failed: calibrated p0 must be a finite value in [0, 1].", call. = FALSE)
-  }
+  validate_open_probability(p0_calibrated, label = "Calibrated p0")
   out <- list(
     p0 = p0_calibrated,
     n_success = calibration_result$n_success[[1L]],
@@ -133,10 +137,7 @@ run_simulation_isoband_strict <- function(config = simulation_isoband_strict_def
     calibration_info <- calibrate_isoband_p0(config = config_local, cache = cache, force_recompute = force_recompute)
     config_local$p0 <- calibration_info$p0
   }
-  if (!is.numeric(config_local$p0) || length(config_local$p0) != 1L || !is.finite(config_local$p0) ||
-      config_local$p0 <= 0 || config_local$p0 >= 1) {
-    stop("p0 must be a finite scalar strictly between 0 and 1 after calibration/manual assignment.", call. = FALSE)
-  }
+  validate_open_probability(config_local$p0, label = "Resolved p0")
 
   result_file <- isoband_result_path(
     config = config_local,
