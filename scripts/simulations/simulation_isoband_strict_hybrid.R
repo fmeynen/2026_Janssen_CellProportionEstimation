@@ -29,9 +29,9 @@ simulation_isoband_strict_defaults <- function() {
     n_add = 8L,
     R_final = 30L,
     n_candidates = 500L,
-    # Replicate count used for single-point p0 calibration.
+    # High replicate count for stable single-point p0 calibration (still user-configurable).
     calibration_B = 5000L,
-    # Seed for reproducible p0 calibration.
+    # Fixed default seed for reproducible calibration draws (arbitrary, user-configurable).
     calibration_seed = 270001L
   )
 }
