@@ -34,7 +34,7 @@ simulation_isoband_strict_defaults <- function() {
   )
 }
 
-isoband_midpoint_point <- function(ranges) {
+compute_isoband_midpoint <- function(ranges) {
   ranges <- validate_isoband_ranges(ranges)
   list(
     tau_AE = mean(ranges$tau_AE),
@@ -44,7 +44,7 @@ isoband_midpoint_point <- function(ranges) {
 }
 
 compute_isoband_calibration_scenario_hash <- function(config) {
-  midpoint <- isoband_midpoint_point(config$ranges)
+  midpoint <- compute_isoband_midpoint(config$ranges)
   scenario <- list(
     alpha = config$alpha,
     n = config$n,
@@ -69,7 +69,7 @@ calibrate_isoband_p0 <- function(config,
                                  force_recompute = FALSE,
                                  cache_dir = here::here("results", "calibrated_p")) {
   ranges <- validate_isoband_ranges(config$ranges)
-  midpoint <- isoband_midpoint_point(ranges)
+  midpoint <- compute_isoband_midpoint(ranges)
   cache_file <- isoband_calibrated_p0_path(config = config, dir = cache_dir)
 
   if (cache && !force_recompute && file.exists(cache_file)) {
@@ -99,7 +99,6 @@ calibrate_isoband_p0 <- function(config,
     p0 = p0_calibrated,
     n_success = calibration_result$n_success[[1L]],
     n_total = calibration_result$n_total[[1L]],
-    success_rate = calibration_result$success_rate[[1L]],
     calibration_point = midpoint,
     scenario_hash = compute_isoband_calibration_scenario_hash(config)
   )
