@@ -297,7 +297,7 @@ estimate_success_surface <- function(phat_mat, p, cutoff, ae_grid, are_grid) {
   # Broadcast true proportions across replicates for vectorised error computation.
   p_mat   <- matrix(p, nrow = B, ncol = K, byrow = TRUE)
   ae_mat  <- abs(phat_mat - p_mat)        # B x K; no clipping
-  are_mat <- ae_mat / p_mat               # B x K; Inf/NaN possible when p == 0
+  are_mat <- ae_mat / p_mat               # B x K; all p > 0 guaranteed by validation above
 
   # Cutoff applied to TRUE proportions: same for every replicate.
   use_AE <- p < cutoff

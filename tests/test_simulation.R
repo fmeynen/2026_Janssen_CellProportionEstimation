@@ -635,7 +635,7 @@ surf_all_AE <- estimate_success_surface(
   ae_grid  = c(0.01, 0.10),
   are_grid = c(0.05)
 )
-# rep1: max AE = max(0.01, 0.01) = 0.01; rep2: max AE = max(0.07, 0.07) = 0.07
+# rep1: max AE = 0.01; rep2: max AE = 0.07
 prob_all_AE_01 <- surf_all_AE$success_prob[surf_all_AE$ae_thr == 0.01 & surf_all_AE$are_thr == 0.05]
 prob_all_AE_10 <- surf_all_AE$success_prob[surf_all_AE$ae_thr == 0.10 & surf_all_AE$are_thr == 0.05]
 if (!isTRUE(all.equal(prob_all_AE_01, 0.5))) stop("all-AE-regime: prob at tau_AE=0.01 should be 0.5")

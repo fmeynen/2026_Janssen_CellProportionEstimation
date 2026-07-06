@@ -32,6 +32,8 @@ success_surface_defaults <- function() {
     B        = 500L,
     cutoff   = 0.05,
     ae_grid  = seq(0.001, 0.10,  length.out = 60L),
+    # ARE can exceed 1; upper bound of 2.0 covers most realistic scenarios
+    # and the plot clips the display window to y_limits = c(0.01, 1) by default.
     are_grid = seq(0.01,  2.0,   length.out = 60L),
     seed     = 260926L
   )
