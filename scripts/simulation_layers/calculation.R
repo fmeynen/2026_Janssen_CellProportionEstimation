@@ -231,7 +231,8 @@ evaluate_hybrid_success_grid_for_cutoff <- function(phat_mat, p, cutoff,
   B <- nrow(phat_mat)
   K <- ncol(phat_mat)
 
-  # Pre-compute error matrices once (B x K); reuse across all grid points.
+  # Pre-compute error matrices once (B x K); reused across all (tau_AE, tau_ARE)
+  # threshold pairs evaluated for this cutoff.
   p_mat   <- matrix(p, nrow = B, ncol = K, byrow = TRUE)
   ae_mat  <- abs(phat_mat - p_mat)
   are_mat <- ae_mat / p_mat
@@ -253,8 +254,10 @@ evaluate_hybrid_success_grid_for_cutoff <- function(phat_mat, p, cutoff,
     # Per-cell-type success (B x K): selected metric must be strictly below threshold.
     cell_success <- ifelse(use_AE_mat, ae_mat < tau_AE_i, are_mat < tau_ARE_i)
 
-    # Replicate success: every cell type must succeed.
-    rep_success <- rowSums(cell_success, na.rm = TRUE) == K
+    # Replicate success: every cell type must succeed.  No na.rm so that any
+    # unexpected NA propagates to a failed replicate rather than being silently
+    # ignored.
+    rep_success <- rowSums(cell_success) == K
 
     data.frame(
       cutoff    = cutoff,

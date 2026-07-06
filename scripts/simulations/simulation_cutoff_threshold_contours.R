@@ -143,16 +143,13 @@ run_simulation_cutoff_threshold_contours <- function(
     p_max_i <- if ("p_max" %in% names(p_table)) p_table$p_max[[i]] else NA_real_
     p_i     <- as.numeric(p_table[i, index_cols, drop = FALSE])
 
+    phat_long_i <- sim_out$phat_long[sim_out$phat_long$alpha == alpha_i, , drop = FALSE]
     same_p_max <- if (is.na(p_max_i)) {
-      is.na(sim_out$phat_long$p_max)
+      is.na(phat_long_i$p_max)
     } else {
-      sim_out$phat_long$p_max == p_max_i
+      phat_long_i$p_max == p_max_i
     }
-    phat_subset <- sim_out$phat_long[
-      sim_out$phat_long$alpha == alpha_i & same_p_max,
-      c("replicate", "index", "phat"),
-      drop = FALSE
-    ]
+    phat_subset <- phat_long_i[same_p_max, c("replicate", "index", "phat"), drop = FALSE]
     phat_subset <- phat_subset[
       order(phat_subset$index, phat_subset$replicate), , drop = FALSE
     ]

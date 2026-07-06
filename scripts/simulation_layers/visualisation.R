@@ -396,12 +396,12 @@ plot_success_contours <- function(grid_df,
       breaks = levels_sorted
     ) +
     ggplot2::labs(
-      x     = "AE threshold (\u03c4_AE)",
-      y     = "ARE threshold (\u03c4_ARE)",
+      x     = "AE threshold (tau_AE)",
+      y     = "ARE threshold (tau_ARE)",
       title = "Hybrid cutoff success-probability contours",
       subtitle = paste0(
-        "Region above-right of each contour: success probability \u2265 level\n",
-        "Routing rule: AE when phat < cutoff, ARE when phat \u2265 cutoff"
+        "Region above-right of each contour: success probability >= level\n",
+        "Routing rule: AE when phat < cutoff, ARE when phat >= cutoff"
       )
     ) +
     ggplot2::theme_bw() +
