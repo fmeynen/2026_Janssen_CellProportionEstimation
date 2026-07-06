@@ -240,6 +240,61 @@ plot_argmax_histogram <- function(result, metric, alphas = NULL, p_maxs = NULL) 
 }
 
 
+#' Plot success-probability contour lines over an AE x ARE threshold grid.
+#'
+#' @param surface_df    Data.frame returned by [estimate_success_surface()],
+#'   with at least columns `ae_thr`, `are_thr`, and `success_prob`.
+#' @param contour_levels Numeric vector of probability levels at which to draw
+#'   contour lines (default `seq(0.1, 0.9, 0.1)`).
+#' @param x_limits      Length-2 numeric vector for x-axis display window
+#'   (AE threshold; default `c(0.001, 0.05)`).  Passed to
+#'   [ggplot2::coord_cartesian()]; data outside the window are not dropped.
+#' @param y_limits      Length-2 numeric vector for y-axis display window
+#'   (ARE threshold; default `c(0.01, 1)`).
+#'
+#' @return A ggplot object with contour lines of estimated success probability.
+#'
+#' @seealso [estimate_success_surface()] to produce the required `surface_df`.
+plot_success_contours <- function(surface_df,
+                                  contour_levels = seq(0.1, 0.9, 0.1),
+                                  x_limits = c(0.001, 0.05),
+                                  y_limits = c(0.01, 1)) {
+  stopifnot(
+    is.data.frame(surface_df),
+    all(c("ae_thr", "are_thr", "success_prob") %in% names(surface_df)),
+    is.numeric(contour_levels),
+    length(contour_levels) >= 1L,
+    is.numeric(x_limits),
+    length(x_limits) == 2L,
+    is.numeric(y_limits),
+    length(y_limits) == 2L
+  )
+
+  plot_title <- if ("cutoff" %in% names(surface_df)) {
+    paste0(
+      "Success probability contours (cutoff = ",
+      unique(surface_df$cutoff)[[1L]],
+      ")"
+    )
+  } else {
+    "Success probability contours"
+  }
+
+  ggplot2::ggplot(
+    surface_df,
+    ggplot2::aes(x = ae_thr, y = are_thr, z = success_prob)
+  ) +
+    ggplot2::geom_contour(breaks = contour_levels) +
+    ggplot2::coord_cartesian(xlim = x_limits, ylim = y_limits) +
+    ggplot2::labs(
+      x     = "AE threshold",
+      y     = "ARE threshold",
+      title = plot_title
+    ) +
+    ggplot2::theme_bw()
+}
+
+
 #' Plot a heatmap of best hybrid cutoffs across AE/ARE threshold pairs.
 #'
 #' @param phat_mat       B x K numeric matrix of observed proportions (B

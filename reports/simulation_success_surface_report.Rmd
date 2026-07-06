@@ -1,0 +1,112 @@
+---
+title: "Success Probability Contour Report"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    toc: false
+    number_sections: true
+    extra_dependencies: ["float"]
+params:
+  alpha: 2
+  K: 10
+  n: 10000
+  B: 500
+  cutoff: 0.05
+  ae_grid_n: 60
+  are_grid_n: 60
+  seed: 260926
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE,
+                      fig.width = 7, fig.height = 5)
+knitr::opts_chunk$set(fig.pos = "H")
+
+knitr::opts_knit$set(root.dir = here::here())
+source(here::here("scripts", "simulations", "simulation_success_surface.R"))
+```
+
+# Overview
+
+This report estimates and visualises success probabilities over a 2D grid of
+AE and ARE thresholds for a single hybrid cutoff value \(c\).
+
+**Success rule** — for each cell type \(k\):
+
+- If the *true* proportion \(p_k < c\), success requires \(\text{AE}_k \le \tau_{AE}\).
+- If \(p_k \ge c\), success requires \(\text{ARE}_k \le \tau_{ARE}\).
+
+A simulation replicate is a success only when *all* \(K\) cell types
+simultaneously satisfy their respective condition.
+
+```{r configuration}
+config <- list(
+  alpha    = as.numeric(params$alpha),
+  K        = as.integer(params$K),
+  n        = as.integer(params$n),
+  B        = as.integer(params$B),
+  cutoff   = as.numeric(params$cutoff),
+  ae_grid  = seq(0.001, 0.10,  length.out = as.integer(params$ae_grid_n)),
+  are_grid = seq(0.01,  2.0,   length.out = as.integer(params$are_grid_n)),
+  seed     = as.integer(params$seed)
+)
+
+setup_table <- data.frame(
+  Parameter = c("alpha", "K", "n", "B", "cutoff",
+                "AE grid", "ARE grid", "seed"),
+  Value = c(
+    config$alpha,
+    config$K,
+    config$n,
+    config$B,
+    config$cutoff,
+    paste0("seq(0.001, 0.10, length.out = ", params$ae_grid_n, ")"),
+    paste0("seq(0.01, 2.0, length.out = ",   params$are_grid_n, ")"),
+    config$seed
+  ),
+  stringsAsFactors = FALSE
+)
+
+knitr::kable(
+  setup_table,
+  caption = "Simulation configuration used in this report.",
+  booktabs = TRUE
+)
+```
+
+```{r run-simulation}
+result <- run_success_surface(config)
+```
+
+\newpage
+
+# True proportions
+
+```{r proportion-table}
+p_df <- data.frame(
+  index = seq_along(result$p),
+  p     = round(result$p, digits = 5)
+)
+knitr::kable(
+  p_df,
+  caption = paste0(
+    "True proportions for alpha = ", config$alpha,
+    ". Cell types with p < ", config$cutoff, " use AE; others use ARE."
+  ),
+  booktabs = TRUE
+)
+```
+
+\newpage
+
+# Success probability contour plot
+
+The contour lines mark estimated success probabilities from
+`seq(0.1, 0.9, 0.1)`.  The x-axis is the AE threshold and the y-axis is the
+ARE threshold.  Axis limits are set to `[0.001, 0.05]` (AE) and
+`[0.01, 1]` (ARE); data outside these windows contribute to contour
+estimation but are not displayed.
+
+```{r contour-plot, fig.cap=paste0("Success probability contours for cutoff = ", config$cutoff, ".")}
+print(result$contour_plot)
+```

@@ -248,6 +248,97 @@ find_best_hybrid_cutoff <- function(curve_df,
   )
 }
 
+#' Estimate success probabilities over a 2D AE x ARE threshold grid.
+#'
+#' For a fixed cutoff `c`, cell type k uses AE when the true proportion
+#' `p[k] < c`, and ARE otherwise.  A simulation replicate is a success when
+#' every cell type satisfies its respective threshold.  The function sweeps all
+#' `(tau_AE, tau_ARE)` pairs and returns the estimated success probability at
+#' each grid point.
+#'
+#' @param phat_mat B x K numeric matrix of observed proportions.
+#' @param p        True proportion vector of length K (all strictly positive).
+#' @param cutoff   Numeric scalar cutoff applied to TRUE proportions to select
+#'   the error metric per cell type.  Cell k uses AE if `p[k] < cutoff`,
+#'   otherwise ARE.
+#' @param ae_grid  Numeric vector of AE threshold values.
+#' @param are_grid Numeric vector of ARE threshold values.
+#'
+#' @return Tidy data.frame with one row per `(ae_thr, are_thr)` pair and
+#'   columns: `ae_thr`, `are_thr`, `success_prob`, `cutoff`, `n_sim`.
+#'
+#' @details
+#' ARE values are not clipped.  Axis limits in the corresponding plot should
+#' be used to control display when ARE is large.
+#'
+#' @seealso [plot_success_contours()] for visualising the returned surface.
+estimate_success_surface <- function(phat_mat, p, cutoff, ae_grid, are_grid) {
+  stopifnot(
+    is.matrix(phat_mat),
+    is.numeric(phat_mat),
+    is.numeric(p),
+    length(p) == ncol(phat_mat),
+    all(is.finite(p)),
+    all(p > 0),
+    is.numeric(cutoff),
+    length(cutoff) == 1L,
+    is.finite(cutoff),
+    is.numeric(ae_grid),
+    length(ae_grid) >= 1L,
+    all(is.finite(ae_grid)),
+    is.numeric(are_grid),
+    length(are_grid) >= 1L,
+    all(is.finite(are_grid))
+  )
+
+  B <- nrow(phat_mat)
+  K <- ncol(phat_mat)
+
+  # Broadcast true proportions across replicates for vectorised error computation.
+  p_mat   <- matrix(p, nrow = B, ncol = K, byrow = TRUE)
+  ae_mat  <- abs(phat_mat - p_mat)        # B x K; no clipping
+  are_mat <- ae_mat / p_mat               # B x K; Inf/NaN possible when p == 0
+
+  # Cutoff applied to TRUE proportions: same for every replicate.
+  use_AE <- p < cutoff
+
+  # Per-replicate worst-case error within each regime.
+  # When a regime has no cell types (vacuously satisfied), use -Inf so that
+  # the threshold condition is always TRUE.
+  max_ae_per_rep <- if (any(use_AE)) {
+    apply(ae_mat[, use_AE, drop = FALSE], 1L, max)
+  } else {
+    rep(-Inf, B)
+  }
+  max_are_per_rep <- if (any(!use_AE)) {
+    apply(are_mat[, !use_AE, drop = FALSE], 1L, max)
+  } else {
+    rep(-Inf, B)
+  }
+
+  grid <- expand.grid(
+    ae_thr  = ae_grid,
+    are_thr = are_grid,
+    KEEP.OUT.ATTRS = FALSE,
+    stringsAsFactors = FALSE
+  )
+
+  # Success probability at each grid point: fraction of replicates where both
+  # regime conditions are simultaneously satisfied.
+  grid$success_prob <- mapply(
+    function(tau_AE_i, tau_ARE_i) {
+      mean((max_ae_per_rep <= tau_AE_i) & (max_are_per_rep <= tau_ARE_i))
+    },
+    grid$ae_thr,
+    grid$are_thr
+  )
+
+  grid$cutoff <- cutoff
+  grid$n_sim  <- B
+  grid
+}
+
+
 #' Run hybrid cutoff analysis for one simulation scenario.
 #'
 #' @param phat_mat  B x K numeric matrix of observed proportions.

@@ -566,5 +566,135 @@ if (length(unique(layout_grid$COL)) != expected_alpha_n || length(unique(layout_
 }
 pass("plot_argmax_histogram facets with alpha columns and p_max rows")
 
+# ---- 11. estimate_success_surface -------------------------------------------
+cat("\n11. estimate_success_surface\n")
+
+# Simple 2-replicate, 2-cell-type scenario, cutoff = 0.05.
+# p = c(0.03, 0.97): cell 1 has p < 0.05 -> AE regime; cell 2 >= 0.05 -> ARE regime.
+phat_surf <- matrix(
+  c(
+    0.04, 0.96,   # replicate 1
+    0.10, 0.90    # replicate 2
+  ),
+  nrow = 2L, byrow = TRUE
+)
+p_surf <- c(0.03, 0.97)
+
+# AE for replicate 1: |0.04 - 0.03| = 0.01; ARE for replicate 1: |0.96 - 0.97| / 0.97 ~ 0.0103
+# AE for replicate 2: |0.10 - 0.03| = 0.07; ARE for replicate 2: |0.90 - 0.97| / 0.97 ~ 0.0722
+surf <- estimate_success_surface(
+  phat_mat = phat_surf,
+  p        = p_surf,
+  cutoff   = 0.05,
+  ae_grid  = c(0.05, 0.10),
+  are_grid = c(0.05, 0.10)
+)
+
+if (!is.data.frame(surf)) stop("estimate_success_surface should return a data.frame")
+pass("estimate_success_surface returns a data.frame")
+
+expected_cols <- c("ae_thr", "are_thr", "success_prob", "cutoff", "n_sim")
+if (!all(expected_cols %in% names(surf))) {
+  stop(paste("estimate_success_surface missing columns:", paste(expected_cols, collapse = ", ")))
+}
+pass("estimate_success_surface has expected columns")
+
+if (nrow(surf) != 4L) stop("estimate_success_surface should return one row per grid point (2 x 2 = 4)")
+pass("estimate_success_surface row count equals grid size")
+
+# At (tau_AE=0.05, tau_ARE=0.05):
+#   rep1: AE=0.01 <= 0.05 TRUE, ARE=0.0103 <= 0.05 TRUE -> success
+#   rep2: AE=0.07 <= 0.05 FALSE                         -> fail
+# Expected success_prob = 0.5
+prob_05_05 <- surf$success_prob[surf$ae_thr == 0.05 & surf$are_thr == 0.05]
+if (!isTRUE(all.equal(prob_05_05, 0.5))) {
+  stop(paste("success_prob at (0.05, 0.05) should be 0.5, got", prob_05_05))
+}
+pass("estimate_success_surface correct probability at (tau_AE=0.05, tau_ARE=0.05)")
+
+# At (tau_AE=0.10, tau_ARE=0.10):
+#   rep1: AE=0.01 <= 0.10 TRUE, ARE=0.0103 <= 0.10 TRUE -> success
+#   rep2: AE=0.07 <= 0.10 TRUE, ARE=0.0722 <= 0.10 TRUE -> success
+# Expected success_prob = 1.0
+prob_10_10 <- surf$success_prob[surf$ae_thr == 0.10 & surf$are_thr == 0.10]
+if (!isTRUE(all.equal(prob_10_10, 1.0))) {
+  stop(paste("success_prob at (0.10, 0.10) should be 1.0, got", prob_10_10))
+}
+pass("estimate_success_surface correct probability at (tau_AE=0.10, tau_ARE=0.10)")
+
+# Cutoff and n_sim metadata are recorded.
+if (!isTRUE(all.equal(unique(surf$cutoff), 0.05))) stop("cutoff metadata should be 0.05")
+if (!isTRUE(all.equal(unique(surf$n_sim), 2L)))    stop("n_sim metadata should be 2")
+pass("estimate_success_surface records cutoff and n_sim metadata")
+
+# All-AE-regime edge case: cutoff = 1 (all p < 1).
+surf_all_AE <- estimate_success_surface(
+  phat_mat = phat_surf,
+  p        = p_surf,
+  cutoff   = 1,          # p < 1 for all cells -> all in AE regime
+  ae_grid  = c(0.01, 0.10),
+  are_grid = c(0.05)
+)
+# rep1: max AE = max(0.01, 0.01) = 0.01; rep2: max AE = max(0.07, 0.07) = 0.07
+prob_all_AE_01 <- surf_all_AE$success_prob[surf_all_AE$ae_thr == 0.01 & surf_all_AE$are_thr == 0.05]
+prob_all_AE_10 <- surf_all_AE$success_prob[surf_all_AE$ae_thr == 0.10 & surf_all_AE$are_thr == 0.05]
+if (!isTRUE(all.equal(prob_all_AE_01, 0.5))) stop("all-AE-regime: prob at tau_AE=0.01 should be 0.5")
+if (!isTRUE(all.equal(prob_all_AE_10, 1.0))) stop("all-AE-regime: prob at tau_AE=0.10 should be 1.0")
+pass("estimate_success_surface handles all-AE-regime (cutoff above all true proportions)")
+
+# Monotonicity: increasing thresholds should not decrease success probability.
+surf_mono <- estimate_success_surface(
+  phat_mat = phat_surf,
+  p        = p_surf,
+  cutoff   = 0.05,
+  ae_grid  = sort(c(0.01, 0.05, 0.10)),
+  are_grid = sort(c(0.01, 0.05, 0.10))
+)
+ae_sorted <- sort(unique(surf_mono$ae_thr))
+are_sorted <- sort(unique(surf_mono$are_thr))
+for (i in seq_len(length(ae_sorted) - 1L)) {
+  for (j in seq_len(length(are_sorted))) {
+    prob_lo <- surf_mono$success_prob[surf_mono$ae_thr == ae_sorted[[i]]   & surf_mono$are_thr == are_sorted[[j]]]
+    prob_hi <- surf_mono$success_prob[surf_mono$ae_thr == ae_sorted[[i+1]] & surf_mono$are_thr == are_sorted[[j]]]
+    if (prob_lo > prob_hi + 1e-12) {
+      stop(sprintf(
+        "Monotonicity violated: prob decreased as ae_thr increased from %s to %s (are_thr=%s)",
+        ae_sorted[[i]], ae_sorted[[i+1]], are_sorted[[j]]
+      ))
+    }
+  }
+}
+pass("estimate_success_surface success probability is monotone in ae_thr")
+
+# ---- 12. plot_success_contours ----------------------------------------------
+cat("\n12. plot_success_contours\n")
+
+surf_plot <- estimate_success_surface(
+  phat_mat = matrix(c(0.04, 0.96, 0.10, 0.90, 0.02, 0.98, 0.15, 0.85), nrow = 4L, byrow = TRUE),
+  p        = c(0.03, 0.97),
+  cutoff   = 0.05,
+  ae_grid  = seq(0.001, 0.15, length.out = 15L),
+  are_grid = seq(0.01, 1.0,   length.out = 15L)
+)
+
+contour_plt <- plot_success_contours(surf_plot)
+if (!inherits(contour_plt, "ggplot")) stop("plot_success_contours should return a ggplot object")
+pass("plot_success_contours returns a ggplot object")
+
+# Custom limits and levels are accepted without error.
+contour_plt_custom <- plot_success_contours(
+  surf_plot,
+  contour_levels = c(0.25, 0.5, 0.75),
+  x_limits = c(0.001, 0.05),
+  y_limits = c(0.01, 1)
+)
+if (!inherits(contour_plt_custom, "ggplot")) stop("plot_success_contours should accept custom limits")
+pass("plot_success_contours accepts custom contour levels and axis limits")
+
+# Title includes cutoff when present in surface_df.
+title_text <- contour_plt$labels$title
+if (!grepl("0.05", title_text)) stop("contour plot title should include the cutoff value")
+pass("plot_success_contours title includes the cutoff value")
+
 # ---- Done ------------------------------------------------------------------
 cat("\nAll tests passed.\n")
