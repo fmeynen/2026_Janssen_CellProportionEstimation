@@ -566,5 +566,72 @@ if (length(unique(layout_grid$COL)) != expected_alpha_n || length(unique(layout_
 }
 pass("plot_argmax_histogram facets with alpha columns and p_max rows")
 
+# ---- 11. isoband automation helpers ------------------------------------------
+cat("\n11. isoband automation helpers\n")
+
+strict_eval <- evaluate_hybrid_success_cell_level_strict(
+  phat_mat = matrix(c(0.05, 0.20), nrow = 1L),
+  p = c(0.01, 0.10),
+  cutoff = 0.05,
+  tau_AE = 0.06,
+  tau_ARE = 0.9
+)
+if (!identical(as.logical(strict_eval$use_AE_matrix), c(FALSE, FALSE))) {
+  stop("strict evaluator should route obs == cutoff to ARE branch")
+}
+pass("evaluate_hybrid_success_cell_level_strict uses obs < cutoff for AE")
+
+ranges_ok <- validate_isoband_ranges(
+  list(
+    tau_AE = c(0.01, 0.2),
+    tau_ARE = c(0.1, 1.0),
+    cutoff = c(0.05, 0.5)
+  )
+)
+if (!is.list(ranges_ok) || !all(c("tau_AE", "tau_ARE", "cutoff") %in% names(ranges_ok))) {
+  stop("validate_isoband_ranges should return normalized named ranges")
+}
+pass("validate_isoband_ranges accepts valid ranges")
+
+container <- new_isoband_result_container(inputs = list(alpha = 2))
+expected_isoband_container_fields <- c("design_history", "round_summaries", "final_band_points", "final_model", "inputs")
+if (!all(expected_isoband_container_fields %in% names(container))) {
+  stop("new_isoband_result_container should return expected skeleton fields")
+}
+pass("new_isoband_result_container returns expected skeleton")
+
+if (requireNamespace("mgcv", quietly = TRUE) && requireNamespace("lhs", quietly = TRUE)) {
+  set.seed(123L)
+  isoband_smoke <- run_isoband_pipeline(
+    alpha = 2,
+    p0 = 0.6,
+    ranges = list(
+      tau_AE = c(0.01, 0.08),
+      tau_ARE = c(0.1, 1.5),
+      cutoff = c(0.01, 0.2)
+    ),
+    eps = 0.2,
+    seed = 42L,
+    n = 100L,
+    K = 5L,
+    n_init = 8L,
+    R_init = 10L,
+    n_rounds_max = 1L,
+    n_add = 6L,
+    R_final = 15L,
+    n_candidates = 200L
+  )
+  if (!all(c("design_history", "final_band_points", "final_band_points_unrefined", "final_model", "round_summaries") %in% names(isoband_smoke))) {
+    stop("run_isoband_pipeline should return expected core fields")
+  }
+  if (nrow(isoband_smoke$final_band_points_unrefined) > 0L &&
+    any(abs(isoband_smoke$final_band_points_unrefined$p_hat - 0.6) > 0.2 + 1e-12)) {
+    stop("unrefined isoband points should satisfy abs(p_hat - p0) <= eps")
+  }
+  pass("run_isoband_pipeline smoke test returns expected isoband outputs")
+} else {
+  cat("  SKIP  isoband smoke test (mgcv and lhs not both available)\n")
+}
+
 # ---- Done ------------------------------------------------------------------
 cat("\nAll tests passed.\n")

@@ -40,7 +40,7 @@ simulation_errorchoice_defaults <- function() {
     tie_method = "random",
     proportion_method = "beta",
     #p_max = c(0.2, 0.3,0.4, 0.5),
-    seed = 260926L
+    seed = 260925L
   )
 }
 

@@ -39,3 +39,28 @@ simulation_result_path <- function(config, dir, name) {
   dir.create(dir, recursive = TRUE, showWarnings = FALSE)
   file.path(dir, paste0(name, "_", hash_config(config), ".rds"))
 }
+
+#' Build deterministic path for isoband simulation output.
+#'
+#' @param config Named list of isoband parameters.
+#' @param dir Directory for output files.
+#' @param name Prefix for file names.
+#'
+#' @return Absolute path string.
+isoband_result_path <- function(config, dir, name = "simulation_isoband") {
+  simulation_result_path(config = config, dir = dir, name = name)
+}
+
+#' Save isoband result object to disk.
+#'
+#' @param result Isoband result object.
+#' @param config Named list of isoband parameters.
+#' @param dir Directory for output files.
+#' @param name Prefix for file names.
+#'
+#' @return Invisibly returns the saved file path.
+save_isoband_result <- function(result, config, dir, name = "simulation_isoband") {
+  out_path <- isoband_result_path(config = config, dir = dir, name = name)
+  saveRDS(result, out_path)
+  invisible(out_path)
+}

@@ -148,3 +148,18 @@ extract_phat_long <- function(rep_out, alpha_i, p_max_i, B) {
     stringsAsFactors = FALSE
   )
 }
+
+#' Create an empty isoband result container.
+#'
+#' @param inputs Optional list of pipeline inputs.
+#'
+#' @return Standardized list skeleton for isoband outputs.
+new_isoband_result_container <- function(inputs = NULL) {
+  list(
+    design_history = data.frame(),
+    round_summaries = data.frame(),
+    final_band_points = data.frame(),
+    final_model = NULL,
+    inputs = inputs
+  )
+}
