@@ -12,27 +12,27 @@ simulation_isoband_strict_defaults <- function() {
     alpha = 2,
     p0 = NULL,
     ranges = list(
-      tau_AE = c(0.01, 0.08),
-      tau_ARE = c(0.10, 1.20),
-      cutoff = c(0.02, 0.20)
+      tau_AE = c(0.001, 0.01),
+      tau_ARE = c(0.01, 0.1),
+      cutoff = c(0, 0.1)
     ),
-    eps = 0.10,
+    eps = 0.001,
     seed = 260925L,
-    n = 200L,
-    K = 5L,
+    n = 10000L,
+    K = 10L,
     proportion_method = "beta",
     p_max = NULL,
     model = "multinomial",
-    n_init = 12L,
-    R_init = 20L,
-    n_rounds_max = 1L,
-    n_add = 8L,
-    R_final = 30L,
-    n_candidates = 500L,
+    n_init = 50L,
+    R_init = 10000L,
+    n_rounds_max = 20L,
+    n_add = 10L,
+    R_final = 10000L,
+    n_candidates = 2000L,
     # High replicate count for stable single-point p0 calibration (still user-configurable).
-    calibration_B = 5000L,
+    calibration_B = 100000L,
     # Fixed default seed for reproducible calibration draws (arbitrary, user-configurable).
-    calibration_seed = 270001L
+    calibration_seed = 260925L
   )
 }
 
