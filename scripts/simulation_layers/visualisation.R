@@ -334,3 +334,86 @@ plot_hybrid_best_cutoff_heatmap <- function(phat_mat, p, cutoffs,
     ) +
     ggplot2::theme_bw()
 }
+
+
+#' Plot success-probability contour lines over a threshold grid.
+#'
+#' Visualises the output of [evaluate_hybrid_success_grid_multi_cutoff()] as
+#' contour lines on the (AE threshold, ARE threshold) plane.  Each contour
+#' marks the boundary at the requested success-probability level; regions
+#' **above-right** of a contour have success probability at or above that
+#' level (i.e. looser thresholds are easier to satisfy).
+#'
+#' @param grid_df         Data.frame returned by
+#'   `evaluate_hybrid_success_grid_multi_cutoff()` (or
+#'   `evaluate_hybrid_success_grid_for_cutoff()`), with columns `cutoff`,
+#'   `tau_AE`, `tau_ARE`, and `p_success`.
+#' @param levels          Numeric vector of contour levels to draw
+#'   (values in (0, 1); defaults to `c(0.5, 0.6, 0.7, 0.8, 0.9)`).
+#' @param facet_by_cutoff Logical; when `TRUE` (default) and `grid_df` contains
+#'   more than one cutoff, panels are created with
+#'   `facet_wrap(~cutoff)`.
+#' @param fill_contours   Logical; when `TRUE` fill the space between contours
+#'   using a blue gradient.  Defaults to `FALSE`.
+#'
+#' @return A ggplot object.  Contour labels show the success-probability level.
+plot_success_contours <- function(grid_df,
+                                  levels = c(0.5, 0.6, 0.7, 0.8, 0.9),
+                                  facet_by_cutoff = TRUE,
+                                  fill_contours = FALSE) {
+  stopifnot(
+    is.data.frame(grid_df),
+    all(c("cutoff", "tau_AE", "tau_ARE", "p_success") %in% names(grid_df)),
+    nrow(grid_df) >= 1L,
+    is.numeric(levels),
+    length(levels) >= 1L,
+    all(levels > 0 & levels < 1)
+  )
+
+  levels_sorted <- sort(unique(levels))
+
+  p <- ggplot2::ggplot(
+    grid_df,
+    ggplot2::aes(x = tau_AE, y = tau_ARE, z = p_success)
+  )
+
+  if (fill_contours) {
+    p <- p + ggplot2::geom_contour_filled(
+      breaks = c(0, levels_sorted, 1),
+      alpha  = 0.6
+    )
+  }
+
+  p <- p +
+    ggplot2::geom_contour(
+      ggplot2::aes(color = ggplot2::after_stat(level)),
+      breaks    = levels_sorted,
+      linewidth = 0.7
+    ) +
+    ggplot2::scale_color_viridis_c(
+      name   = "Success\nprobability",
+      limits = c(min(levels_sorted), max(levels_sorted)),
+      breaks = levels_sorted
+    ) +
+    ggplot2::labs(
+      x     = "AE threshold (\u03c4_AE)",
+      y     = "ARE threshold (\u03c4_ARE)",
+      title = "Hybrid cutoff success-probability contours",
+      subtitle = paste0(
+        "Region above-right of each contour: success probability \u2265 level\n",
+        "Routing rule: AE when phat < cutoff, ARE when phat \u2265 cutoff"
+      )
+    ) +
+    ggplot2::theme_bw() +
+    ggplot2::theme(legend.position = "right")
+
+  n_cutoffs <- length(unique(grid_df$cutoff))
+  if (facet_by_cutoff && n_cutoffs > 1L) {
+    p <- p + ggplot2::facet_wrap(
+      ~cutoff,
+      labeller = ggplot2::labeller(cutoff = function(x) paste0("cutoff = ", x))
+    )
+  }
+
+  p
+}

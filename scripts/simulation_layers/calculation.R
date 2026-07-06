@@ -191,6 +191,117 @@ sweep_hybrid_cutoffs_cell_level <- function(phat_mat, p, cutoffs, tau_AE, tau_AR
   do.call(rbind, rows)
 }
 
+#' Evaluate hybrid AE/ARE success probability over a threshold grid for one cutoff.
+#'
+#' For each replicate, routes each cell type to AE when the observed proportion
+#' is **strictly below** `cutoff`, and to ARE when it is **at or above** `cutoff`.
+#' A replicate succeeds only when every cell type passes its selected threshold
+#' (AE < `tau_AE` or ARE < `tau_ARE`).  Success probability is estimated as the
+#' fraction of successful replicates over `nrow(phat_mat)`.
+#'
+#' @param phat_mat       B x K numeric matrix of observed proportions.
+#' @param p              True proportion vector of length K.
+#' @param cutoff         Numeric scalar cutoff on observed proportions.
+#'   Cell types with `phat < cutoff` use AE; those with `phat >= cutoff` use ARE.
+#' @param tau_AE_values  Numeric vector of AE thresholds to evaluate.
+#' @param tau_ARE_values Numeric vector of ARE thresholds to evaluate.
+#'
+#' @return Tidy data.frame with one row per (tau_AE, tau_ARE) pair and columns:
+#'   cutoff, tau_AE, tau_ARE, p_success, n_sim.
+evaluate_hybrid_success_grid_for_cutoff <- function(phat_mat, p, cutoff,
+                                                     tau_AE_values, tau_ARE_values) {
+  stopifnot(
+    is.matrix(phat_mat),
+    is.numeric(phat_mat),
+    is.numeric(p),
+    length(p) == ncol(phat_mat),
+    all(is.finite(p)),
+    all(p > 0),
+    is.numeric(cutoff),
+    length(cutoff) == 1L,
+    is.finite(cutoff),
+    is.numeric(tau_AE_values),
+    length(tau_AE_values) >= 1L,
+    all(is.finite(tau_AE_values)),
+    is.numeric(tau_ARE_values),
+    length(tau_ARE_values) >= 1L,
+    all(is.finite(tau_ARE_values))
+  )
+
+  B <- nrow(phat_mat)
+  K <- ncol(phat_mat)
+
+  # Pre-compute error matrices once (B x K); reuse across all grid points.
+  p_mat   <- matrix(p, nrow = B, ncol = K, byrow = TRUE)
+  ae_mat  <- abs(phat_mat - p_mat)
+  are_mat <- ae_mat / p_mat
+
+  # Routing mask: TRUE means use AE (phat strictly below cutoff).
+  use_AE_mat <- phat_mat < cutoff
+
+  threshold_grid <- expand.grid(
+    tau_AE  = tau_AE_values,
+    tau_ARE = tau_ARE_values,
+    KEEP.OUT.ATTRS = FALSE,
+    stringsAsFactors = FALSE
+  )
+
+  rows <- lapply(seq_len(nrow(threshold_grid)), function(i) {
+    tau_AE_i  <- threshold_grid$tau_AE[[i]]
+    tau_ARE_i <- threshold_grid$tau_ARE[[i]]
+
+    # Per-cell-type success (B x K): selected metric must be strictly below threshold.
+    cell_success <- ifelse(use_AE_mat, ae_mat < tau_AE_i, are_mat < tau_ARE_i)
+
+    # Replicate success: every cell type must succeed.
+    rep_success <- rowSums(cell_success, na.rm = TRUE) == K
+
+    data.frame(
+      cutoff    = cutoff,
+      tau_AE    = tau_AE_i,
+      tau_ARE   = tau_ARE_i,
+      p_success = mean(rep_success),
+      n_sim     = B,
+      stringsAsFactors = FALSE
+    )
+  })
+
+  do.call(rbind, rows)
+}
+
+
+#' Evaluate hybrid AE/ARE success probability over a threshold grid for multiple cutoffs.
+#'
+#' Calls [evaluate_hybrid_success_grid_for_cutoff()] for each cutoff and
+#' row-binds the results into a single tidy data.frame.  AE and ARE error
+#' matrices are recomputed once per `(phat_mat, p)` pair and shared across
+#' all (cutoff, threshold) combinations.
+#'
+#' @param phat_mat       B x K numeric matrix of observed proportions.
+#' @param p              True proportion vector of length K.
+#' @param cutoffs        Numeric vector of candidate cutoffs.
+#' @param tau_AE_values  Numeric vector of AE thresholds to evaluate.
+#' @param tau_ARE_values Numeric vector of ARE thresholds to evaluate.
+#'
+#' @return Tidy data.frame with columns: cutoff, tau_AE, tau_ARE, p_success, n_sim.
+evaluate_hybrid_success_grid_multi_cutoff <- function(phat_mat, p, cutoffs,
+                                                       tau_AE_values, tau_ARE_values) {
+  stopifnot(is.numeric(cutoffs), length(cutoffs) >= 1L, all(is.finite(cutoffs)))
+
+  rows <- lapply(cutoffs, function(cutoff_i) {
+    evaluate_hybrid_success_grid_for_cutoff(
+      phat_mat       = phat_mat,
+      p              = p,
+      cutoff         = cutoff_i,
+      tau_AE_values  = tau_AE_values,
+      tau_ARE_values = tau_ARE_values
+    )
+  })
+
+  do.call(rbind, rows)
+}
+
+
 #' Find the best hybrid cutoff from a sweep curve.
 #'
 #' @param curve_df  Data.frame returned by `sweep_hybrid_cutoffs_cell_level()`.
