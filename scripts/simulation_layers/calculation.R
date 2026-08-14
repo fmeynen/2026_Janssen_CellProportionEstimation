@@ -397,6 +397,13 @@ iterate_sample_size_for_alpha <- function(alpha, n_init, config) {
   tolerance <- config$sample_size_tolerance
   max_iter  <- config$max_iterations
   B         <- config$B
+  stopifnot(
+    is.numeric(target),    length(target)    == 1L, target > 0,    target < 1,
+    is.numeric(tolerance), length(tolerance) == 1L, tolerance >= 0,
+    is.numeric(max_iter) || is.integer(max_iter),
+    length(max_iter) == 1L, max_iter >= 1L
+  )
+  max_iter <- as.integer(max_iter)
 
   current_n      <- as.integer(ceiling(n_init))
   diag_rows      <- vector("list", max_iter * 3L)

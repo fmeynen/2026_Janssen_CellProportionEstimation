@@ -306,7 +306,12 @@ simulate_success_at_n <- function(alpha, n, config) {
   # with a threshold has its max error <= that threshold.
   success <- rep(TRUE, config$B)
   for (m in metrics) {
-    if (!is.null(taus[[m]]) && length(taus[[m]]) == 1L) {
+    if (is.null(taus[[m]])) {
+      warning(sprintf(
+        "simulate_success_at_n: metric '%s' has no threshold in config$taus; it will not contribute to the success criterion.",
+        m
+      ))
+    } else if (length(taus[[m]]) == 1L) {
       success <- success & (max_errors[, m] <= taus[[m]])
     }
   }

@@ -57,8 +57,7 @@ run_simulation_samplesize <- function(config = simulation_sample_size_defaults()
   for (a in seq_along(alphas)) {
     iter_result        <- iterate_sample_size_for_alpha(alphas[a], n_init, config)
     n_samples[a]       <- iter_result$final_n
-    diag_a             <- iter_result$diagnostics
-    diag_list[[a]]     <- diag_a
+    diag_list[[a]]     <- iter_result$diagnostics
     n_init             <- iter_result$final_n
   }
 
