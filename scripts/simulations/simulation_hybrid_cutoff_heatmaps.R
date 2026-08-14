@@ -18,7 +18,7 @@ simulation_hybrid_heatmap_defaults <- function() {
     tau_AE_values = c(0.01, 0.02, 0.03, 0.04, 0.05),
     tau_ARE_values = c(0.2, 0.4, 0.6, 0.8, 1.0, 1.2),
     maximize = "replicate",
-    seed = 260926L
+    seed = 260925L
   )
 }
 
