@@ -251,3 +251,70 @@ run_replicates <- function(p, n, B,
                       model = model, tie_method = tie_method, seed = seed)
   )
 }
+
+
+#' Simulate replicates at one sample size and derive per-replicate success.
+#'
+#' Success is defined as: for every metric that has a corresponding threshold
+#' in `taus`, the max error across all K cell types must be at or below that
+#' threshold.  When both AE and ARE are requested and both have thresholds,
+#' a replicate is successful only if *both* conditions hold simultaneously.
+#'
+#' @param alpha          Positive scalar; Beta shape parameter used to
+#'   generate the true proportions.
+#' @param n              Total sample size (positive integer).
+#' @param config         Named list; must contain at minimum:
+#'   \describe{
+#'     \item{K}{Number of cell types.}
+#'     \item{B}{Number of replicates.}
+#'     \item{taus}{Named list with one scalar threshold per metric (e.g.
+#'       `list(AE = 0.02, ARE = 0.5)`); scalar thresholds only.}
+#'     \item{metrics}{Character vector of metric names to simulate.}
+#'     \item{model}{Sampling model (currently `"multinomial"`).}
+#'     \item{tie_method}{Tie-breaking rule for max-error argmax.}
+#'     \item{proportion_method}{Proportion-generation method.}
+#'     \item{seed}{Optional integer RNG seed.}
+#'   }
+#'
+#' @return List with elements:
+#'   \describe{
+#'     \item{success}{Logical vector of length B.}
+#'     \item{success_count}{Integer; number of successful replicates.}
+#'     \item{success_rate}{Numeric; fraction of successful replicates.}
+#'     \item{rep_out}{Raw output of `run_replicates()`.}
+#'   }
+simulate_success_at_n <- function(alpha, n, config) {
+  p <- generate_proportions(
+    alpha  = alpha,
+    K      = config$K,
+    method = config$proportion_method
+  )
+  rep_out <- run_replicates(
+    p          = p,
+    n          = n,
+    B          = config$B,
+    metrics    = config$metrics,
+    model      = config$model,
+    tie_method = config$tie_method,
+    seed       = config$seed
+  )
+  max_errors <- rep_out$max_errors
+  metrics    <- config$metrics
+  taus       <- config$taus
+
+  # Build a B-length logical success vector: replicate passes iff every metric
+  # with a threshold has its max error <= that threshold.
+  success <- rep(TRUE, config$B)
+  for (m in metrics) {
+    if (!is.null(taus[[m]]) && length(taus[[m]]) == 1L) {
+      success <- success & (max_errors[, m] <= taus[[m]])
+    }
+  }
+
+  list(
+    success       = success,
+    success_count = sum(success),
+    success_rate  = mean(success),
+    rep_out       = rep_out
+  )
+}
