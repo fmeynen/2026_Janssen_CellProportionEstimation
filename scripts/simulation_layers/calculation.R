@@ -429,7 +429,24 @@ iterate_sample_size_for_alpha <- function(alpha, n_init, config) {
       error = function(e) list(n_raw = current_n, n_rounded = current_n)
     )
     new_n <- as.integer(ceiling(solved$n_rounded))
+
+    # Clamp the new estimate to prevent extreme jumps when the pilot success
+    # rates are all near 0% or all near 100%.
+    # - If mean success rate < target (need more n): cap at 2x the largest pilot.
+    # - If mean success rate >= target (need less n): floor at 0.5x the smallest pilot.
+    mean_success_rate <- mean(success_rates)
+    if (mean_success_rate < target) {
+      upper_bound <- as.integer(ceiling(2.0 * max(pilot_ns)))
+      new_n <- min(new_n, upper_bound)
+    } else {
+      lower_bound <- as.integer(ceiling(0.5 * min(pilot_ns)))
+      new_n <- max(new_n, lower_bound)
+    }
+    new_n <- pmax(new_n, 1L)
+
     coefs <- stats::coef(glm_fit)
+    n_unclamped <- as.integer(ceiling(solved$n_rounded))
+    clamped     <- (new_n != n_unclamped)
 
     for (j in seq_along(pilot_ns)) {
       diag_idx <- diag_idx + 1L
@@ -445,6 +462,7 @@ iterate_sample_size_for_alpha <- function(alpha, n_init, config) {
         glm_slope           = coefs[[2L]],
         n_raw               = solved$n_raw,
         n_rounded           = new_n,
+        n_clamped           = clamped,
         stopping_reason     = NA_character_,
         stringsAsFactors    = FALSE
       )

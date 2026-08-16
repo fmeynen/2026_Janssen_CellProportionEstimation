@@ -644,7 +644,7 @@ if (!iter_result$stopping_reason %in% c("tolerance", "max_iterations")) {
 }
 req_cols <- c("alpha", "iteration", "pilot_index", "n", "success_count",
               "success_rate", "target_success_rate", "glm_intercept",
-              "glm_slope", "n_raw", "n_rounded", "stopping_reason")
+              "glm_slope", "n_raw", "n_rounded", "n_clamped", "stopping_reason")
 missing_cols <- setdiff(req_cols, names(iter_result$diagnostics))
 if (length(missing_cols) > 0L) {
   stop(paste("diagnostics missing columns:", paste(missing_cols, collapse = ", ")))
@@ -653,6 +653,31 @@ if (nrow(iter_result$diagnostics) %% 3L != 0L) {
   stop("diagnostics must have a multiple of 3 rows (3 pilot points per iteration)")
 }
 pass("iterate_sample_size_for_alpha returns correct structure")
+
+# Clamping: when success rate is near 0%, new_n should not exceed 2x the largest pilot
+cfg_clamp_low <- ss_config
+cfg_clamp_low$taus           <- list(AE = 0, ARE = 0)  # force 0% success
+cfg_clamp_low$max_iterations <- 1L
+cfg_clamp_low$sample_size_tolerance <- Inf
+n_init_clamp <- 200L
+iter_clamp_low <- iterate_sample_size_for_alpha(alpha = 2, n_init = n_init_clamp, config = cfg_clamp_low)
+upper_bound <- as.integer(ceiling(2.0 * as.integer(ceiling(1.05 * n_init_clamp))))
+if (iter_clamp_low$final_n > upper_bound) {
+  stop("final_n must not exceed 2x the largest pilot when success rate is near 0%")
+}
+pass("clamping prevents new_n from exceeding 2x largest pilot when success is ~0%")
+
+# Clamping: when success rate is near 100%, new_n should not be less than 0.5x the smallest pilot
+cfg_clamp_high <- ss_config
+cfg_clamp_high$taus           <- list(AE = 100, ARE = 100)  # force 100% success
+cfg_clamp_high$max_iterations <- 1L
+cfg_clamp_high$sample_size_tolerance <- Inf
+iter_clamp_high <- iterate_sample_size_for_alpha(alpha = 2, n_init = n_init_clamp, config = cfg_clamp_high)
+lower_bound <- as.integer(ceiling(0.5 * as.integer(ceiling(0.95 * n_init_clamp))))
+if (iter_clamp_high$final_n < lower_bound) {
+  stop("final_n must not go below 0.5x the smallest pilot when success rate is ~100%")
+}
+pass("clamping prevents new_n from going below 0.5x smallest pilot when success is ~100%")
 
 # Stopping at tolerance: use tolerance = Inf so it stops in 1 iteration
 cfg_tol_inf <- ss_config
