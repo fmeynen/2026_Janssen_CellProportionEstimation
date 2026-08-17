@@ -17,10 +17,10 @@ lapply(simulation_helper_files, function(f) {
 # Setup config file -----------------------------------------------------------------------------------------------
 
 simulation_sample_size_defaults <- function(n_init = 200000) {
-  tau_AE <- 0.02
-  tau_ARE <- 0.5
+  tau_AE <- 0.002
+  tau_ARE <- 0.05
   list(
-    alpha                = c(2, 2.5, 3, 4, 5),
+    alpha                = seq(from = 2, to = 5, by = 0.1),
     K                    = 10L,
     n                    = n_init,
     B                    = 500L,
@@ -30,8 +30,8 @@ simulation_sample_size_defaults <- function(n_init = 200000) {
     tie_method           = "random",
     proportion_method    = "beta",
     seed                 = 260926L,
-    success_rate_target  = 0.9,
-    sample_size_tolerance = 10L,
+    success_rate_target  = 0.95,
+    sample_size_tolerance = 100L,
     max_iterations       = 20L
   )
 }
@@ -75,3 +75,6 @@ run_simulation_samplesize <- function(config = simulation_sample_size_defaults()
 calculate_sample_size <- function(alpha, n_init, config) {
   iterate_sample_size_for_alpha(alpha, n_init, config)$final_n
 }
+
+res <- run_simulation_samplesize()
+res$diagnostics
