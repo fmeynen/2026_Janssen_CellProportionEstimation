@@ -438,9 +438,11 @@ iterate_sample_size_for_alpha <- function(alpha, n_init, config) {
     if (mean_success_rate < target) {
       upper_bound <- as.integer(ceiling(2.0 * max(pilot_ns)))
       new_n <- min(new_n, upper_bound)
+      if(is.na(new_n)){new_n <- upper_bound}
     } else {
       lower_bound <- as.integer(ceiling(0.5 * min(pilot_ns)))
       new_n <- max(new_n, lower_bound)
+      if(is.na(new_n)){new_n <- lower_bound}
     }
     new_n <- pmax(new_n, 1L)
 
