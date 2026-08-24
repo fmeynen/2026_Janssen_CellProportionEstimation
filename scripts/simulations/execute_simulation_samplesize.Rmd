@@ -1,6 +1,5 @@
-#+ echo=TRUE, results='hide'
 
-
+```{r}
 # simulation_samplesize.R
 #
 # Iterative sample-size estimation for each alpha.
@@ -11,9 +10,8 @@
 #   3. Invert the curve to estimate the sample size hitting the target success rate.
 #   4. Repeat until convergence or max iterations; always round up.
 #   5. Propagate the final estimate as the next alpha's n_init.
-# ---------------------------------------------------------------------------
-
-#+ echo=TRUE, results='hide'
+```
+```{r}
 simulation_helper_files <- list.files(here::here("scripts", "simulation_layers"))
 lapply(simulation_helper_files, function(f) {
   source(here::here("scripts", "simulation_layers", f))
@@ -43,10 +41,6 @@ simulation_sample_size_defaults <- function(n_init = 200000) {
 }
 
 config <- simulation_sample_size_defaults()
-
-
-# Calculate sample sizes ------------------------------------------------------------------------------------------
-
 
 run_simulation_samplesize <- function(config = simulation_sample_size_defaults(),
                                       cache = TRUE,
@@ -87,13 +81,16 @@ run_simulation_samplesize <- function(config = simulation_sample_size_defaults()
 
 
 res <- run_simulation_samplesize()
-
-#+ echo=TRUE, results='markup'
 res$sample_size
+
+plot(config$alpha, log10(res$sample_size))
+
+
+
 ggplot(data.frame(alpha = config$alpha, sample_size = res$sample_size),
        aes(x = alpha, y = sample_size)) +
   geom_line() +
-  labs(x = "Alpha", y = "Sample Size (log scale)") +
+  labs(x = "Alpha", y = "log10(Sample Size)") +
   theme_minimal() +
   scale_y_log10()
 
@@ -102,3 +99,5 @@ ggplot(data.frame(alpha = config$alpha, sample_size = res$sample_size),
   geom_line() +
   labs(x = "Alpha", y = "Sample Size") +
   theme_minimal()
+```
+
