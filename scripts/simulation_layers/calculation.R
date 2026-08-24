@@ -410,6 +410,11 @@ iterate_sample_size_for_alpha <- function(alpha, n_init, config) {
   diag_idx       <- 0L
   stopping_reason <- "max_iterations"
 
+  # Pre-allocate accumulated pilot data across all iterations (for GLM fitting)
+  all_pilot_ns       <- integer(max_iter * 3L)
+  all_success_counts <- integer(max_iter * 3L)
+  n_accumulated      <- 0L
+
   for (iter in seq_len(max_iter)) {
     pilot_ns <- as.integer(ceiling(c(0.95, 1.00, 1.05) * current_n))
     pilot_ns <- pmax(pilot_ns, 1L)   # guard against n < 1
@@ -423,7 +428,17 @@ iterate_sample_size_for_alpha <- function(alpha, n_init, config) {
       success_rates[j]  <- sim_j$success_rate
     }
 
-    glm_fit  <- fit_success_glm(pilot_ns, success_counts, B)
+    # Accumulate evidence: add this iteration's pilot points to the history
+    idx <- n_accumulated + seq_len(3L)
+    all_pilot_ns[idx]       <- pilot_ns
+    all_success_counts[idx] <- success_counts
+    n_accumulated           <- n_accumulated + 3L
+
+    glm_fit  <- fit_success_glm(
+      all_pilot_ns[seq_len(n_accumulated)],
+      all_success_counts[seq_len(n_accumulated)],
+      B
+    )
     solved   <- tryCatch(
       solve_sample_size_from_glm(glm_fit, target),
       error = function(e) list(n_raw = current_n, n_rounded = current_n)
