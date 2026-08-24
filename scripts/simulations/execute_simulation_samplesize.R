@@ -1,3 +1,6 @@
+#+ echo=TRUE, results='hide'
+
+
 # simulation_samplesize.R
 #
 # Iterative sample-size estimation for each alpha.
@@ -9,10 +12,13 @@
 #   4. Repeat until convergence or max iterations; always round up.
 #   5. Propagate the final estimate as the next alpha's n_init.
 # ---------------------------------------------------------------------------
+
+#+ echo=TRUE, results='hide'
 simulation_helper_files <- list.files(here::here("scripts", "simulation_layers"))
 lapply(simulation_helper_files, function(f) {
   source(here::here("scripts", "simulation_layers", f))
 })
+library(ggplot2)
 
 # Setup config file -----------------------------------------------------------------------------------------------
 
@@ -20,7 +26,7 @@ simulation_sample_size_defaults <- function(n_init = 200000) {
   tau_AE <- 0.002
   tau_ARE <- 0.05
   list(
-    alpha                = seq(from = 2, to = 5, by = 0.1),
+    alpha                = seq(from = 2, to = 5, by = 0.05),
     K                    = 10L,
     n                    = n_init,
     B                    = 500L,
@@ -29,12 +35,18 @@ simulation_sample_size_defaults <- function(n_init = 200000) {
     model                = "multinomial",
     tie_method           = "random",
     proportion_method    = "beta",
-    seed                 = 260926L,
+    seed                 = 260925L,
     success_rate_target  = 0.95,
     sample_size_tolerance = 100L,
     max_iterations       = 20L
   )
 }
+
+config <- simulation_sample_size_defaults()
+
+
+# Calculate sample sizes ------------------------------------------------------------------------------------------
+
 
 run_simulation_samplesize <- function(config = simulation_sample_size_defaults(),
                                       cache = TRUE,
@@ -72,9 +84,21 @@ run_simulation_samplesize <- function(config = simulation_sample_size_defaults()
   result
 }
 
-calculate_sample_size <- function(alpha, n_init, config) {
-  iterate_sample_size_for_alpha(alpha, n_init, config)$final_n
-}
+
 
 res <- run_simulation_samplesize()
-res$diagnostics
+
+#+ echo=TRUE, results='markup'
+res$sample_size
+ggplot(data.frame(alpha = config$alpha, sample_size = res$sample_size),
+       aes(x = alpha, y = sample_size)) +
+  geom_line() +
+  labs(x = "Alpha", y = "Sample Size (log scale)") +
+  theme_minimal() +
+  scale_y_log10()
+
+ggplot(data.frame(alpha = config$alpha, sample_size = res$sample_size),
+       aes(x = alpha, y = sample_size)) +
+  geom_line() +
+  labs(x = "Alpha", y = "Sample Size") +
+  theme_minimal()
