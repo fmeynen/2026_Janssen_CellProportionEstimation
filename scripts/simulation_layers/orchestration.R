@@ -1,29 +1,29 @@
-# R/orchestration.R
-#
+
+# Orchestration ---------------------------------------------------------------------------------------------------
 # Orchestration layer: high-level experiment runners that coordinate all other layers.
 #
-# Depends on: R/validation_utils.R, R/simulation.R, R/calculation.R, R/extraction.R
-# ---------------------------------------------------------------------------
+# Depends on: simulation.R, calculation.R, extraction.R
 
 
-#' Run the full simulation experiment end-to-end.
+
+# Original Simulation ---------------------------------------------------------------------------------------------
+
+#' Run the original full simulation experiment end-to-end.
 #'
-#' @param alpha      Numeric vector; one or more positive shape values used by
-#'   the selected proportion-generation method (default method is Beta-based).
+#' @param alpha      Numeric vector; one or more positive shape values used by the selected proportion-generation method
+#'      (default method is Beta-based).
 #' @param K          Number of cell types (default 10).
 #' @param n          Total sample size per replicate.
 #' @param B          Number of replicates.
-#' @param taus       Numeric vector of thresholds (same for all metrics) or a
-#'   named list with one numeric vector per metric
-#'   (e.g. `list(AE = c(...), ARE = c(...))`).
+#' @param taus       Numeric vector of thresholds (same for all metrics) or a named list with one numeric vector per
+#'      metric (e.g. `list(AE = c(...), ARE = c(...))`).
 #' @param metrics    Error metrics; any subset of `c("AE", "ARE", "TSE", "LAE")`.
-#' @param proportion_method Proportion-generation method (`"beta"` or
-#'   `"fixed_max_beta"`). The fixed-max Beta method places `p_max` at the
-#'   highest index and warns then fails for impossible combinations.
-#' @param p_max      Fixed largest true proportion(s) used by
-#'   `proportion_method = "fixed_max_beta"`. Can be a numeric vector.
-#'   When multiple values are provided, all alpha × p_max combinations are
-#'   attempted; impossible fixed-max combinations are warned and skipped.
+#' @param proportion_method Proportion-generation method (`"beta"` or `"fixed_max_beta"`).
+#'    The fixed-max Beta method places `p_max` at the highest index and warns then fails for impossible combinations.
+#' @param p_max      Fixed largest true proportion(s) used by `proportion_method = "fixed_max_beta"`.
+#'      Can be a numeric vector.
+#'      When multiple values are provided, all alpha × p_max combinations are attempted; impossible fixed-max
+#'      combinations are warned and skipped.
 #' @param model      Sampling model (currently only "multinomial").
 #' @param tie_method Tie-breaking rule for max-error argmax.
 #' @param seed       Optional integer seed for reproducibility.
@@ -157,6 +157,8 @@ run_simulation_experiment <- function(alpha, K = 10, n, B, taus,
   )
 }
 
+
+# Hybrid Cutoff Simulation ----------------------------------------------------------------------------------------
 
 #' Run simulation and hybrid cutoff analysis across all alpha/p_max scenarios.
 #'

@@ -1,57 +1,17 @@
-# R/calculation.R
-#
+# Calculation Layer -----------------------------------------------------------------------------------------------
 # Calculation layer: error metrics, threshold evaluation, and hybrid cutoff logic.
-#
-# Depends on: (none from this package; uses base R only)
-# ---------------------------------------------------------------------------
 
 
-#' Compute per-cell-type error vectors for each requested metric.
-#'
-#' @param phat    Observed proportion vector (length K).
-#' @param p       True proportion vector (length K).
-#' @param metrics Character vector; any subset of `c("AE", "ARE", "TSE", "LAE")`.
-#' @param n       Total sample size; required only when `"TSE"` is in `metrics`.
-#'
-#' @return Named list with one numeric vector per metric (length K).
-#'
-#' @details
-#' AE  = abs(phat - p)
-#' ARE = abs(phat - p) / p  (no epsilon stabilisation; NaN/Inf for p == 0 is expected)
-#' TSE = asinh(sqrt(2 * n^2 * (phat - p)^2))  (requires n)
-#' LAE = log(abs(phat - p))
-compute_errors <- function(phat, p, metrics = c("AE", "ARE"), n = NULL) {
-  stopifnot(length(phat) == length(p))
-  if ("TSE" %in% metrics && is.null(n)) {
-    stop("n must be provided when metric 'TSE' is requested.", call. = FALSE)
-  }
-  result <- list()
-  if ("AE" %in% metrics) {
-    result[["AE"]] <- abs(phat - p)
-  }
-  if ("ARE" %in% metrics) {
-    result[["ARE"]] <- abs(phat - p) / p   # ARE: NaN when p == 0 and phat == 0 (0/0); Inf when p == 0 and phat != 0; no stabilisation by design
-  }
-  if ("TSE" %in% metrics) {
-    result[["TSE"]] <- asinh(sqrt(2 * n^2 * (phat - p)^2))
-  }
-  if ("LAE" %in% metrics) {
-    result[["LAE"]] <- log(abs(phat - p))
-  }
-  result
-}
-
+# Compute Success Rate --------------------------------------------------------------------------------------------
 
 #' Compute success rates for each metric across a grid of thresholds.
 #'
 #' Runs post-hoc on stored max errors; no re-simulation needed.
 #'
 #' @param max_errors B x M matrix of max error values (from `run_replicates()`).
-#' @param taus       Either a numeric vector of threshold values applied to
-#'   every metric, or a named list with one numeric vector per metric
-#'   (e.g. `list(AE = c(...), ARE = c(...))`).  When a list is supplied every
-#'   metric present in `max_errors` must have an entry.
-#'
+#' @param taus       Either a numeric vector of threshold values applied to every metric, or a named list with one
+#'    numeric vector per metric (e.g. `list(AE = c(...), ARE = c(...))`).  When a list is supplied every metric present
+#'    in `max_errors` must have an entry.
 #' @param errors     Optional B x K x M array of per-cell-type errors
 #'   (from `run_replicates()`), used to compute `mean_n_above`.
 #'
@@ -106,6 +66,8 @@ evaluate_thresholds <- function(max_errors, taus, errors = NULL) {
   do.call(rbind, rows)
 }
 
+
+# Hybrid Thresholds -----------------------------------------------------------------------------------------------
 
 #' Evaluate hybrid AE/ARE success at the cell-type level for one cutoff.
 #'
@@ -302,9 +264,7 @@ run_hybrid_cutoff_analysis <- function(phat_mat, p, cutoffs, tau_AE, tau_ARE,
 }
 
 
-# ---------------------------------------------------------------------------
-# Sample-size estimation helpers
-# ---------------------------------------------------------------------------
+# Sample-Size Estimation Helpers--------------------------------------------------------------------------------------
 
 #' Fit a binomial GLM to relate sample size to observed success counts.
 #'
@@ -363,20 +323,17 @@ solve_sample_size_from_glm <- function(glm_fit, target_success_rate) {
 
 #' Iteratively estimate the required sample size for one alpha.
 #'
-#' At each iteration three pilot sample sizes are evaluated: 95%, 100%, and
-#' 105% of the current estimate.  A binomial GLM is fitted to the resulting
-#' success counts and inverted to obtain the next estimate.  Iteration stops
-#' when `abs(new_n - old_n) <= config$sample_size_tolerance` or
-#' `config$max_iterations` is reached.  Sample sizes are always rounded up.
+#' At each iteration three pilot sample sizes are evaluated: 95%, 100%, and 105% of the current estimate.
+#' A binomial GLM is fitted to the resulting success counts and inverted to obtain the next estimate.
+#' Iteration stops when `abs(new_n - old_n) <= config$sample_size_tolerance` or `config$max_iterations` is reached.
+#' Sample sizes are always rounded up.
 #'
 #' @param alpha   Positive scalar Beta shape parameter.
 #' @param n_init  Initial sample-size estimate (positive integer).
-#' @param config  Named list; must contain all fields required by
-#'   `simulate_success_at_n()` plus:
+#' @param config  Named list; must contain all fields required by `simulate_success_at_n()` plus:
 #'   \describe{
 #'     \item{success_rate_target}{Target success probability in (0, 1).}
-#'     \item{sample_size_tolerance}{Stopping tolerance (non-negative integer
-#'       or numeric).}
+#'     \item{sample_size_tolerance}{Stopping tolerance (non-negative integer or numeric).}
 #'     \item{max_iterations}{Maximum number of iterations (positive integer).}
 #'   }
 #'

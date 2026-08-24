@@ -1,9 +1,6 @@
-# R/extraction.R
-#
+
+# Extraction Layer ------------------------------------------------------------------------------------------------
 # Extraction layer: pull structured outputs from simulation results.
-#
-# Depends on: (none from this package; uses base R only)
-# ---------------------------------------------------------------------------
 
 
 #' Extract the maximum error value and its index from one error vector.

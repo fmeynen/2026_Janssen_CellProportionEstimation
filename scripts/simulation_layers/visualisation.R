@@ -1,17 +1,17 @@
-# R/visualisation.R
-#
+
+# Visualization Layer ---------------------------------------------------------------------------------------------
+
 # Visualisation layer: plotting functions for simulation results.
 #
-# Depends on: R/validation_utils.R (default_beta_grid), ggplot2
-# ---------------------------------------------------------------------------
+# Depends on ggplot2
 
 
 #' Plot true-proportion points with their underlying Beta-shaped curves.
 #'
 #' @param result Output list from `run_simulation_experiment()`.
 #'
-#' @return A ggplot object. For Beta proportions, facets are by alpha. For
-#'   fixed-max Beta proportions, facets are by p_max (rows) and alpha (columns).
+#' @return A ggplot object. For Beta proportions, facets are by alpha.
+#'    For fixed-max Beta proportions,facets are by p_max (rows) and alpha (columns).
 plot_proportions_curve <- function(result) {
   stopifnot(
     "result must be a list" = is.list(result),
@@ -130,8 +130,7 @@ plot_proportions_curve <- function(result) {
 #' @param metric  Character scalar. If NULL, plot all metrics (faceted).
 #' @param alphas  Optional numeric vector; subset of alpha values to plot.
 #' @param p_maxs  Optional numeric vector; subset of p_max values to plot.
-#' @param target  Success-rate reference line drawn as a horizontal dotted line
-#'                (default 0.95).
+#' @param target  Success-rate reference line drawn as a horizontal dotted line (default 0.95).
 #'
 #' @return A ggplot object.
 plot_success_rate_curve <- function(result, metric = NULL, alphas = NULL,
@@ -240,6 +239,9 @@ plot_argmax_histogram <- function(result, metric, alphas = NULL, p_maxs = NULL) 
 }
 
 
+# Hybrid Cutoff ---------------------------------------------------------------------------------------------------
+
+
 #' Plot a heatmap of best hybrid cutoffs across AE/ARE threshold pairs.
 #'
 #' @param phat_mat       B x K numeric matrix of observed proportions (B
@@ -254,8 +256,8 @@ plot_argmax_histogram <- function(result, metric, alphas = NULL, p_maxs = NULL) 
 #'   `"smallest"`, `"largest"`, or `"median"`.
 #' @param label_digits   Number of digits displayed in cell labels.
 #'
-#' @return A ggplot heatmap object with fill and text labels equal to the
-#'   selected best cutoff for each (tau_AE, tau_ARE) pair.
+#' @return A ggplot heatmap object with fill and text labels equal to the selected best cutoff for each
+#'  (tau_AE, tau_ARE) pair.
 plot_hybrid_best_cutoff_heatmap <- function(phat_mat, p, cutoffs,
                                             tau_AE_values, tau_ARE_values,
                                             maximize = c("cell", "replicate"),

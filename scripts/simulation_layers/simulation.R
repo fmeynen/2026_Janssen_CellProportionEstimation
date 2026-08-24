@@ -1,25 +1,20 @@
-# R/simulation.R
-#
+# Simulation layer ---------------------------------------------------------------------------
 # Simulation layer: generate true proportions, simulate counts, run replicates.
-#
-# Depends on: R/validation_utils.R, R/calculation.R (compute_errors, max_error_summary)
-# ---------------------------------------------------------------------------
 
+# Generate proportions --------------------------------------------------------------------------------------------
 
 #' Generate K true proportions from dbeta(grid, alpha, 1), always rescaled.
 #'
 #' @param alpha  shape1 parameter of Beta(alpha, 1); controls curve steepness.
 #' @param K      number of cell types (default 10).
-#' @param grid   evaluation points in (0,1) (default K equidistant points from
-#'               0.05 to 0.95, avoiding boundary values where dbeta returns 0).
+#' @param grid   evaluation points in (0,1) (default K equidistant points from 0.05 to 0.95, avoiding boundary values
+#'               where dbeta returns 0).
 #'
 #' @return Numeric vector of length K, all strictly positive, summing to 1.
 #'
 #' @details
-#' Unscaled weights: w = dbeta(grid, shape1 = alpha, shape2 = 1).
-#' The default grid avoids 0 and 1 so that all weights — and therefore all
-#' proportions — are strictly positive.  This prevents ARE from producing
-#' NaN or Inf values for any cell type under the default parameters.
+#' Unscaled weights: w = dbeta(grid, shape1 = alpha, shape2 = 1). The default grid avoids 0 and 1 so that all weights —
+#' and therefore all proportions — are strictly positive.
 generate_proportions_beta <- function(alpha, K = 10, grid = default_beta_grid(K)) {
   stopifnot(is.numeric(alpha), length(alpha) == 1L, alpha > 0)
   stopifnot(length(grid) == K)
@@ -34,24 +29,22 @@ generate_proportions_beta <- function(alpha, K = 10, grid = default_beta_grid(K)
 #' @param alpha  shape1 parameter of the Beta(alpha, 1) remainder curve.
 #' @param K      number of cell types (default 10; must be at least 2).
 #' @param p_max  fixed largest true proportion(s), placed at the highest index.
-#' @param grid   evaluation points in (0,1), length K - 1, used to construct
-#'               the Beta-shaped remainder over the first K - 1 indices.
+#' @param grid   evaluation points in (0,1), length K - 1, used to construct the Beta-shaped remainder over the first
+#'               K - 1 indices.
 #'
-#' @return If `length(p_max) == 1`, a numeric vector of length K, all strictly
-#'   positive, summing to 1, with a strictly unique largest value at index K.
-#'   If `length(p_max) > 1`, a numeric matrix with one row per `p_max` value
-#'   and K columns (`index_1`, ..., `index_K`).
+#' @return If `length(p_max) == 1`, a numeric vector of length K, all strictly positive, summing to 1, with a strictly
+#'         unique largest value at index K.
+#'         If `length(p_max) > 1`, a numeric matrix with one row per `p_max` value and K columns
+#'         (`index_1`, ..., `index_K`).
 #'
 #' @details
-#' The first `K - 1` proportions are built from Beta(alpha, 1) weights,
-#' normalized and then rescaled to sum to `1 - p_max`. The final proportion is
-#' set to `p_max`, so the largest true proportion is fixed at the highest
-#' index. If the rescaled remainder contains any value `>= p_max`, the
-#' combination of `alpha`, `K`, and `p_max` is impossible for a strictly unique
-#' fixed maximum; the function warns and then fails. When `p_max` contains
-#' multiple values, this construction is applied independently per value.
-generate_proportions_fixed_max_beta <- function(alpha, K = 10, p_max,
-                                                grid = default_beta_grid(K - 1L)) {
+#' The first `K - 1` proportions are built from Beta(alpha, 1) weights, normalized and then rescaled to sum to
+#' `1 - p_max`. The final proportion is set to `p_max`, so the largest true proportion is fixed at the highest index.
+#' If the rescaled remainder contains any value `>= p_max`, the combination of `alpha`, `K`, and `p_max` is impossible
+#' for a strictly unique fixed maximum; the function warns and then fails. When `p_max` contains multiple values, this
+#' construction is applied independently per value.
+generate_props_fixed_max_beta <- function(alpha, K = 10, p_max,
+                                          grid = default_beta_grid(K - 1L)) {
   if (!is.numeric(alpha) || length(alpha) != 1L || !is.finite(alpha) || alpha <= 0) {
     stop("alpha must be a single positive number.", call. = FALSE)
   }
@@ -71,7 +64,7 @@ generate_proportions_fixed_max_beta <- function(alpha, K = 10, p_max,
     p_mat <- t(vapply(
       p_max,
       function(p_max_i) {
-        generate_proportions_fixed_max_beta(alpha = alpha, K = K, p_max = p_max_i, grid = grid)
+        generate_props_fixed_max_beta(alpha = alpha, K = K, p_max = p_max_i, grid = grid)
       },
       FUN.VALUE = numeric(K)
     ))
@@ -102,15 +95,14 @@ generate_proportions_fixed_max_beta <- function(alpha, K = 10, p_max,
 #' @param alpha   Shape parameter used by the requested generation method.
 #' @param K       Number of cell types (default 10).
 #' @param method  Proportion-generation method: `"beta"` or `"fixed_max_beta"`.
-#' @param p_max   Fixed largest true proportion for `"fixed_max_beta"`. The
-#'   largest value is always placed at the highest index and must remain
-#'   strictly unique; impossible combinations warn and fail. May be a numeric
-#'   vector when calling the fixed-max generator directly.
+#' @param p_max   Fixed largest true proportion for `"fixed_max_beta"`. The largest value is always placed at the
+#'                highest index and must remain strictly unique; impossible combinations warn and fail. May be a numeric
+#'                 vector when calling the fixed-max generator directly.
 #' @param grid    Evaluation points in (0,1), length K (used by `"beta"`).
 #'
 #' @return Numeric vector of length K, all strictly positive, summing to 1.
-#'   For method `"fixed_max_beta"` with vector `p_max`, returns a numeric
-#'   matrix with one row per `p_max` value and K columns.
+#'   For method `"fixed_max_beta"` with vector `p_max`, returns a numeric matrix with one row per `p_max` value and
+#'   K columns.
 generate_proportions <- function(alpha, K = 10,
                                  method = c("beta", "fixed_max_beta"),
                                  p_max = NULL,
@@ -118,7 +110,7 @@ generate_proportions <- function(alpha, K = 10,
   method <- match.arg(method)
   switch(method,
     beta = generate_proportions_beta(alpha = alpha, K = K, grid = grid),
-    fixed_max_beta = generate_proportions_fixed_max_beta(
+    fixed_max_beta = generate_props_fixed_max_beta(
       alpha = alpha,
       K = K,
       p_max = p_max
@@ -126,6 +118,8 @@ generate_proportions <- function(alpha, K = 10,
   )
 }
 
+
+# Simulate counts -------------------------------------------------------------------------------------------------
 
 #' Simulate one vector of counts from Multinomial(n, p).
 #'
@@ -154,8 +148,8 @@ simulate_counts_multinomial <- function(p, n) {
 #' @param p      True proportion vector.
 #' @param n      Total sample size.
 #' @param model  Sampling model; currently only "multinomial" is implemented.
-#' @param ...    Additional arguments forwarded to the concrete simulator
-#'               (reserved for future overdispersed / correlated models).
+#' @param ...    Additional arguments forwarded to the concrete simulator (reserved for future overdispersed /
+#'               correlated models).
 #'
 #' @return Integer vector of length K summing to n.
 simulate_counts <- function(p, n,
@@ -175,6 +169,9 @@ simulate_counts <- function(p, n,
   )
 }
 
+
+# Convert counts to proportions -----------------------------------------------------------------------------------
+
 #' Convert count vector to observed proportions.
 #'
 #' @param y  Integer count vector (length K, sums to n).
@@ -186,12 +183,51 @@ counts_to_proportions <- function(y, n = sum(y)) {
   y / n
 }
 
+# Compute Errors --------------------------------------------------------------------------------------------------
+
+#' Compute per-cell-type error vectors for each requested metric.
+#'
+#' @param phat    Observed proportion vector (length K).
+#' @param p       True proportion vector (length K).
+#' @param metrics Character vector; any subset of `c("AE", "ARE", "TSE", "LAE")`.
+#' @param n       Total sample size; required only when `"TSE"` is in `metrics`.
+#'
+#' @return Named list with one numeric vector per metric (length K).
+#'
+#' @details
+#' AE  = abs(phat - p)
+#' ARE = abs(phat - p) / p  (no epsilon stabilisation; NaN/Inf for p == 0 is expected)
+#' TSE = asinh(sqrt(2 * n^2 * (phat - p)^2))  (requires n)
+#' LAE = log(abs(phat - p))
+compute_errors <- function(phat, p, metrics = c("AE", "ARE"), n = NULL) {
+  stopifnot(length(phat) == length(p))
+  if ("TSE" %in% metrics && is.null(n)) {
+    stop("n must be provided when metric 'TSE' is requested.", call. = FALSE)
+  }
+  result <- list()
+  if ("AE" %in% metrics) {
+    result[["AE"]] <- abs(phat - p)
+  }
+  if ("ARE" %in% metrics) {
+    result[["ARE"]] <- abs(phat - p) / p   # ARE: NaN when p == 0 and phat == 0 (0/0);
+                                           # Inf when p == 0 and phat != 0; no stabilisation by design
+  }
+  if ("TSE" %in% metrics) {
+    result[["TSE"]] <- asinh(sqrt(2 * n^2 * (phat - p)^2))
+  }
+  if ("LAE" %in% metrics) {
+    result[["LAE"]] <- log(abs(phat - p))
+  }
+  result
+}
+
+# Coordinate Simulation --------------------------------------------------------------------------------------------
+
 
 #' Run B simulation replicates and store max errors + argmax indices.
 #'
-#' Efficiency strategy: simulate B times once, store only the per-replicate
-#' max error values and argmax indices.  Threshold evaluation is done
-#' post-hoc by `evaluate_thresholds()` without re-simulating.
+#' Efficiency strategy: simulate B times once, store only the per-replicate max error values and argmax indices.
+#' Threshold evaluation is done post-hoc by `evaluate_thresholds()` without re-simulating.
 #'
 #' @param p          True proportion vector (length K).
 #' @param n          Total sample size.
@@ -253,15 +289,17 @@ run_replicates <- function(p, n, B,
 }
 
 
+# Simulate succes at sample size ----------------------------------------------------------------------------------
+
+
+
 #' Simulate replicates at one sample size and derive per-replicate success.
 #'
-#' Success is defined as: for every metric that has a corresponding threshold
-#' in `taus`, the max error across all K cell types must be at or below that
-#' threshold.  When both AE and ARE are requested and both have thresholds,
-#' a replicate is successful only if *both* conditions hold simultaneously.
+#' Success is defined as: for every metric that has a corresponding threshold in `taus`, the max error across all K cell
+#' types must be at or below that threshold.  When both AE and ARE are requested and both have thresholds, a replicate
+#' is successful only if *both* conditions hold simultaneously.
 #'
-#' @param alpha          Positive scalar; Beta shape parameter used to
-#'   generate the true proportions.
+#' @param alpha          Positive scalar; Beta shape parameter used to generate the true proportions.
 #' @param n              Total sample size (positive integer).
 #' @param config         Named list; must contain at minimum:
 #'   \describe{
@@ -308,7 +346,8 @@ simulate_success_at_n <- function(alpha, n, config) {
   for (m in metrics) {
     if (is.null(taus[[m]])) {
       warning(sprintf(
-        "simulate_success_at_n: metric '%s' has no threshold in config$taus; it will not contribute to the success criterion.",
+        "simulate_success_at_n: metric '%s' has no threshold in config$taus; it will not contribute to the success
+        criterion.",
         m
       ))
     } else if (length(taus[[m]]) == 1L) {
