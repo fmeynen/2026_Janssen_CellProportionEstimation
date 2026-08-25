@@ -147,7 +147,7 @@ plot_success_rate_vs_n <- function(result, target = NULL) {
   missing_cols <- setdiff(required_cols, names(df))
   if (length(missing_cols) > 0L) {
     stop(
-      sprintf("result must contain columns: %s", paste(required_cols, collapse = ", ")),
+      sprintf("result is missing required columns: %s", paste(missing_cols, collapse = ", ")),
       call. = FALSE
     )
   }
