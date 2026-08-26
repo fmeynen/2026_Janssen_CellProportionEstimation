@@ -289,7 +289,7 @@ run_replicates <- function(p, n, B,
 }
 
 
-# Simulate succes at sample size ----------------------------------------------------------------------------------
+# Simulate success at sample size ----------------------------------------------------------------------------------
 
 
 
@@ -361,4 +361,26 @@ simulate_success_at_n <- function(alpha, n, config) {
     success_rate  = mean(success),
     rep_out       = rep_out
   )
+}
+
+
+simulate_success_curve_for_alpha <- function(alpha, n_values, config, seed_offset = 0L) {
+  rows <- vector("list", length(n_values))
+  for (i in seq_along(n_values)) {
+    config_i <- config
+    if (!is.null(config$seed)) {
+      config_i$seed <- as.integer(config$seed + seed_offset + i - 1L)
+    }
+    
+    sim_i <- simulate_success_at_n(alpha = alpha, n = n_values[[i]], config = config_i)
+    rows[[i]] <- data.frame(
+      alpha = alpha,
+      n = as.integer(n_values[[i]]),
+      success_rate = sim_i$success_rate,
+      success_count = sim_i$success_count,
+      B = as.integer(config$B),
+      stringsAsFactors = FALSE
+    )
+  }
+  do.call(rbind, rows)
 }

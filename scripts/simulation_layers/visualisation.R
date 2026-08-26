@@ -238,6 +238,51 @@ plot_argmax_histogram <- function(result, metric, alphas = NULL, p_maxs = NULL) 
   argmax_plot
 }
 
+plot_success_rate_vs_n <- function(result, target = NULL, smooth = FALSE) {
+  if (is.list(result) && "curves" %in% names(result)) {
+    df <- result$curves
+    if (is.null(target) && "inputs" %in% names(result) && "success_rate_target" %in% names(result$inputs)) {
+      target <- result$inputs$success_rate_target
+    }
+  } else {
+    df <- result
+  }
+  
+  required_cols <- c("alpha", "n", "success_rate")
+  missing_cols <- setdiff(required_cols, names(df))
+  if (length(missing_cols) > 0L) {
+    stop(
+      sprintf("result is missing required columns: %s", paste(missing_cols, collapse = ", ")),
+      call. = FALSE
+    )
+  }
+  
+  p <- ggplot2::ggplot(
+    df,
+    ggplot2::aes(
+      x = n,
+      y = success_rate,
+      color = factor(alpha),
+      group = factor(alpha)
+    )
+  ) +
+    (if (smooth) ggplot2::geom_smooth() else ggplot2::geom_line()) +
+    ggplot2::geom_point() +
+    ggplot2::labs(
+      x = "Sample size (n)",
+      y = "Success rate",
+      color = "alpha",
+      title = "Success-rate curves vs sample size"
+    ) +
+    ggplot2::theme_bw()
+  
+  if (!is.null(target)) {
+    p <- p + ggplot2::geom_hline(yintercept = target, linetype = "dotted")
+  }
+  
+  p
+}
+
 
 # Hybrid Cutoff ---------------------------------------------------------------------------------------------------
 
@@ -336,3 +381,5 @@ plot_hybrid_best_cutoff_heatmap <- function(phat_mat, p, cutoffs,
     ) +
     ggplot2::theme_bw()
 }
+
+
