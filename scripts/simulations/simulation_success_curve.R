@@ -16,8 +16,8 @@ sim_success_curve_defaults <- function() {
     n_values = 10^seq(from = 3, to = 7, by = 0.5), #sample size (# of cells)
     K = 10L, #number of cell types
     B = 500L, #number of simulations to estimate success rate
-    taus = list(AE = 0.02, ARE = 0.5),
-    metrics = c("AE", "ARE"), #absolute error, absolute relative error
+    taus = list(AE = 0.02, ARE = 0.5), #AE = absolute error, ARE = absolute relative error
+    metrics = c("AE", "ARE"), 
     model = "multinomial",
     tie_method = "random",
     proportion_method = "beta",
