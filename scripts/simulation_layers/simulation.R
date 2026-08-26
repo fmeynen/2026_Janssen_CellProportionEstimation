@@ -384,3 +384,160 @@ simulate_success_curve_for_alpha <- function(alpha, n_values, config, seed_offse
   }
   do.call(rbind, rows)
 }
+
+
+# Multi-patient success simulation -----------------------------------------------------------------------------------
+
+#' Draw one patient-specific alpha constrained to be above a minimum.
+#'
+#' @param alpha      Baseline alpha value.
+#' @param sigma      Standard deviation of the patient-specific Normal draw.
+#' @param alpha_min  Strict lower bound for accepted draws.
+#' @param max_tries  Maximum number of rejection-sampling attempts.
+#'
+#' @return Numeric scalar greater than `alpha_min`.
+draw_alpha_j <- function(alpha, sigma, alpha_min = 1 + 1e-8, max_tries = 100000L) {
+  if (!is.numeric(alpha) || length(alpha) != 1L || !is.finite(alpha)) {
+    stop("alpha must be a single finite number.", call. = FALSE)
+  }
+  if (!is.numeric(sigma) || length(sigma) != 1L || !is.finite(sigma) || sigma < 0) {
+    stop("sigma must be a single finite number >= 0.", call. = FALSE)
+  }
+  if (!is.numeric(alpha_min) || length(alpha_min) != 1L || !is.finite(alpha_min) || alpha_min <= 1) {
+    stop("alpha_min must be a single finite number > 1.", call. = FALSE)
+  }
+  if (!is.numeric(max_tries) || length(max_tries) != 1L || !is.finite(max_tries) || max_tries %% 1 != 0 || max_tries < 1L) {
+    stop("max_tries must be a single integer >= 1.", call. = FALSE)
+  }
+
+  if (sigma == 0) {
+    return(max(alpha, alpha_min))
+  }
+
+  for (attempt in seq_len(max_tries)) {
+    alpha_j <- stats::rnorm(1L, mean = alpha, sd = sigma)
+    if (is.finite(alpha_j) && alpha_j > alpha_min) {
+      return(alpha_j)
+    }
+  }
+
+  stop(
+    sprintf(
+      "Failed to draw alpha_j > %s from N(%s, %s) after %d attempts.",
+      format(alpha_min, trim = TRUE),
+      format(alpha, trim = TRUE),
+      format(sigma, trim = TRUE),
+      as.integer(max_tries)
+    ),
+    call. = FALSE
+  )
+}
+
+
+#' Simulate multi-patient replicate success at one fixed sample size.
+#'
+#' @param alpha   Positive scalar baseline alpha.
+#' @param n       Total sample size per patient.
+#' @param J       Number of patients per replicate.
+#' @param config  Named list with the standard simulation fields plus
+#'   `alpha_sigma` and `alpha_min`.
+#'
+#' @return List with elements `success`, `success_count`, and `success_rate`.
+simulate_success_at_n_multi_patient <- function(alpha, n, J, config) {
+  if (!is.null(config$seed)) set.seed(config$seed)
+
+  B <- as.integer(config$B)
+  K <- as.integer(config$K)
+  J <- as.integer(J)
+  metrics <- config$metrics
+  taus <- config$taus
+  active_metrics <- intersect(metrics, names(taus))
+
+  if (length(active_metrics) < 1L) {
+    stop("config$taus must provide at least one threshold for a metric in config$metrics.", call. = FALSE)
+  }
+
+  success <- rep(TRUE, B)
+
+  for (b in seq_len(B)) {
+    metric_sums <- lapply(active_metrics, function(m) numeric(K))
+    names(metric_sums) <- active_metrics
+
+    for (j in seq_len(J)) {
+      alpha_j <- draw_alpha_j(
+        alpha = alpha,
+        sigma = config$alpha_sigma,
+        alpha_min = config$alpha_min
+      )
+      p_j <- generate_proportions(
+        alpha = alpha_j,
+        K = K,
+        method = config$proportion_method
+      )
+      rep_out_j <- run_replicates(
+        p = p_j,
+        n = n,
+        B = 1L,
+        metrics = active_metrics,
+        model = config$model,
+        tie_method = config$tie_method,
+        seed = NULL
+      )
+
+      for (m in active_metrics) {
+        metric_sums[[m]] <- metric_sums[[m]] + rep_out_j$errors[1, , m]
+      }
+    }
+
+    success_b <- TRUE
+    for (m in active_metrics) {
+      mean_errors_m <- metric_sums[[m]] / J
+      success_b <- success_b & all(mean_errors_m <= taus[[m]])
+    }
+    success[[b]] <- success_b
+  }
+
+  list(
+    success = success,
+    success_count = sum(success),
+    success_rate = mean(success)
+  )
+}
+
+
+#' Simulate success-rate curve over the number of patients for one alpha.
+#'
+#' @param alpha        Positive scalar baseline alpha.
+#' @param n            Total sample size per patient.
+#' @param J_values     Integer vector of patient counts.
+#' @param config       Multi-patient simulation configuration.
+#' @param seed_offset  Optional integer seed offset used when looping over
+#'   multiple scenarios externally.
+#'
+#' @return Data.frame with one row per `J`.
+simulate_success_curve_for_alpha_over_patients <- function(alpha, n, J_values, config, seed_offset = 0L) {
+  rows <- vector("list", length(J_values))
+  for (i in seq_along(J_values)) {
+    config_i <- config
+    if (!is.null(config$seed)) {
+      config_i$seed <- as.integer(config$seed + seed_offset + i - 1L)
+    }
+
+    sim_i <- simulate_success_at_n_multi_patient(
+      alpha = alpha,
+      n = n,
+      J = J_values[[i]],
+      config = config_i
+    )
+    rows[[i]] <- data.frame(
+      alpha = alpha,
+      n = as.integer(n),
+      J = as.integer(J_values[[i]]),
+      success_rate = sim_i$success_rate,
+      success_count = sim_i$success_count,
+      B = as.integer(config$B),
+      stringsAsFactors = FALSE
+    )
+  }
+  do.call(rbind, rows)
+}
