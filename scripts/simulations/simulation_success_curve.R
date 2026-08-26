@@ -1,23 +1,23 @@
-# simulation_success_curve.R
-#
-# MVP driver for success-rate curves vs sample size.
-#
-# Success is defined jointly across all active scalar thresholds in `config$taus`.
+# Success is defined *jointly* across all active scalar thresholds in `config$taus`.
 
+rm(list = ls())
+# Source Functions ------------------------------------------------------------------------------------------------
 simulation_helper_files <- list.files(here::here("scripts", "simulation_layers"))
 lapply(simulation_helper_files, function(f) {
   source(here::here("scripts", "simulation_layers", f))
 })
 
 
-simulation_success_curve_defaults <- function() {
+# Helper functions ------------------------------------------------------------------------------------------------
+
+sim_success_curve_defaults <- function() {
   list(
     alpha = c(2, 2.5, 3, 4, 5),
-    n_values = seq(500L, 5000L, by = 500L),
-    K = 10L,
-    B = 500L,
+    n_values = 10^seq(from = 3, to = 7, by = 0.5), #sample size (# of cells)
+    K = 10L, #number of cell types
+    B = 500L, #number of simulations to estimate success rate
     taus = list(AE = 0.02, ARE = 0.5),
-    metrics = c("AE", "ARE"),
+    metrics = c("AE", "ARE"), #absolute error, absolute relative error
     model = "multinomial",
     tie_method = "random",
     proportion_method = "beta",
@@ -26,8 +26,7 @@ simulation_success_curve_defaults <- function() {
   )
 }
 
-
-validate_simulation_success_curve_config <- function(config) {
+validate_sim_success_curve_config <- function(config) {
   required_fields <- c(
     "alpha", "n_values", "K", "B", "taus", "metrics",
     "model", "tie_method", "proportion_method", "seed"
@@ -79,35 +78,18 @@ validate_simulation_success_curve_config <- function(config) {
   config
 }
 
+run_simulation_success_curve <- function(config = sim_success_curve_defaults(),
+                                         overwrite = FALSE, dir = "results/simresults", name = "alpha_curve") {
+  config <- validate_sim_success_curve_config(config)
 
-simulate_success_curve_for_alpha <- function(alpha, n_values, config, seed_offset = 0L) {
-  rows <- vector("list", length(n_values))
-  for (i in seq_along(n_values)) {
-    config_i <- config
-    if (!is.null(config$seed)) {
-      config_i$seed <- as.integer(config$seed + seed_offset + i - 1L)
-    }
-
-    sim_i <- simulate_success_at_n(alpha = alpha, n = n_values[[i]], config = config_i)
-    rows[[i]] <- data.frame(
-      alpha = alpha,
-      n = as.integer(n_values[[i]]),
-      success_rate = sim_i$success_rate,
-      success_count = sim_i$success_count,
-      B = as.integer(config$B),
-      stringsAsFactors = FALSE
-    )
+  path <- simulation_result_path(config, dir, name)
+  if(file.exists(path)){
+    return(readRDS(path))
   }
-  do.call(rbind, rows)
-}
-
-
-run_simulation_success_curve <- function(config = simulation_success_curve_defaults()) {
-  config <- validate_simulation_success_curve_config(config)
-
+  
   alpha_values <- config$alpha
-  n_values <- as.integer(config$n_values)
-  curves_list <- vector("list", length(alpha_values))
+  n_values     <- as.integer(config$n_values)
+  curves_list  <- vector("list", length(alpha_values))
 
   for (a in seq_along(alpha_values)) {
     seed_offset <- (a - 1L) * length(n_values)
@@ -125,67 +107,24 @@ run_simulation_success_curve <- function(config = simulation_success_curve_defau
   if ("success_rate_target" %in% names(config)) {
     curves$success_rate_target <- config$success_rate_target
   }
-
-  list(
+  
+  res <- list(
     inputs = config,
     curves = curves
   )
+  saveRDS(res, path)
+  res
 }
 
 
-plot_success_rate_vs_n <- function(result, target = NULL) {
-  if (is.list(result) && "curves" %in% names(result)) {
-    df <- result$curves
-    if (is.null(target) && "inputs" %in% names(result) && "success_rate_target" %in% names(result$inputs)) {
-      target <- result$inputs$success_rate_target
-    }
-  } else {
-    df <- result
-  }
+# Perform simulation ----------------------------------------------------------------------------------------------
+## Configuration
+cfg          <- sim_success_curve_defaults()
+cfg$alpha    <- seq(from = 2, to = 3.5, by = 0.5)
+cfg$n_values <- 10^seq(from = 3, to = 5, by = 0.05)
+cfg$B        <- 10000
+## Simulation
+result <- run_simulation_success_curve(cfg)
 
-  required_cols <- c("alpha", "n", "success_rate")
-  missing_cols <- setdiff(required_cols, names(df))
-  if (length(missing_cols) > 0L) {
-    stop(
-      sprintf("result is missing required columns: %s", paste(missing_cols, collapse = ", ")),
-      call. = FALSE
-    )
-  }
+plot_success_rate_vs_n(result, target = 0.95, smooth = FALSE)
 
-  p <- ggplot2::ggplot(
-    df,
-    ggplot2::aes(
-      x = n,
-      y = success_rate,
-      color = factor(alpha),
-      group = factor(alpha)
-    )
-  ) +
-    ggplot2::geom_line() +
-    ggplot2::geom_point() +
-    ggplot2::labs(
-      x = "Sample size (n)",
-      y = "Success rate",
-      color = "alpha",
-      title = "Success-rate curves vs sample size"
-    ) +
-    ggplot2::theme_bw()
-
-  if (!is.null(target)) {
-    p <- p + ggplot2::geom_hline(yintercept = target, linetype = "dotted")
-  }
-
-  p
-}
-
-
-run_simulation_success_curve_example <- function() {
-  config <- simulation_success_curve_defaults()
-  config$alpha <- c(2, 3)
-  config$n_values <- c(500L, 1000L, 1500L)
-  config$B <- 100L
-
-  result <- run_simulation_success_curve(config)
-  print(head(result$curves, 10))
-  plot_success_rate_vs_n(result)
-}
