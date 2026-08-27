@@ -15,8 +15,8 @@ sim_success_curve_multiple_patients_defaults <- function() {
   list(
     alpha = 2.5,
     n_values = 10^seq(from = 3, to = 5, by = 0.5), # sample size (# of cells) per patient
-    n_patients = c(1L, 2L, 5L, 10L, 20L, 50L, 100L),
-    alpha_sigma = 0.3,
+    n_patients = c(1L, 2L, 3L, 5L),
+    alpha_sigma = 0.1,
     alpha_min = 1 + 1e-8,
     K = 10L, # number of cell types
     B = 500L, # number of simulations to estimate success rate
@@ -130,8 +130,7 @@ run_simulation_success_curve_multiple_patients <- function(config = sim_success_
 # Perform simulation ----------------------------------------------------------------------------------------------
 ## Configuration
 cfg <- sim_success_curve_multiple_patients_defaults()
-cfg$n_values <- 10^seq(from = 3, to = 5, by = 0.05)
-cfg$n_patients <- c(1L, 2L, 5L, 10L, 20L, 50L)
+cfg$n_values <- 10^seq(from = 3, to = 4, by = 0.05)
 cfg$B <- 1000L
 ## Simulation
 result <- run_simulation_success_curve_multiple_patients(cfg)
