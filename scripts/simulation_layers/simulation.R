@@ -436,19 +436,19 @@ draw_alpha_j <- function(alpha, sigma, alpha_min = 1 + 1e-8, max_tries = 100000L
 
 #' Simulate multi-patient replicate success at one fixed sample size.
 #'
-#' @param alpha   Positive scalar baseline alpha.
-#' @param n       Total sample size per patient.
-#' @param J       Number of patients per replicate.
-#' @param config  Named list with the standard simulation fields plus
+#' @param alpha       Positive scalar baseline alpha.
+#' @param n           Total sample size per patient.
+#' @param n_patients  Number of patients per replicate.
+#' @param config      Named list with the standard simulation fields plus
 #'   `alpha_sigma` and `alpha_min`.
 #'
 #' @return List with elements `success`, `success_count`, and `success_rate`.
-simulate_success_at_n_multi_patient <- function(alpha, n, J, config) {
+simulate_success_at_n_multi_patient <- function(alpha, n, n_patients, config) {
   if (!is.null(config$seed)) set.seed(config$seed)
 
   B <- as.integer(config$B)
   K <- as.integer(config$K)
-  J <- as.integer(J)
+  n_patients <- as.integer(n_patients)
   metrics <- config$metrics
   taus <- config$taus
   active_metrics <- intersect(metrics, names(taus))
@@ -463,7 +463,7 @@ simulate_success_at_n_multi_patient <- function(alpha, n, J, config) {
     metric_sums <- lapply(active_metrics, function(m) numeric(K))
     names(metric_sums) <- active_metrics
 
-    for (j in seq_len(J)) {
+    for (j in seq_len(n_patients)) {
       alpha_j <- draw_alpha_j(
         alpha = alpha,
         sigma = config$alpha_sigma,
@@ -491,7 +491,7 @@ simulate_success_at_n_multi_patient <- function(alpha, n, J, config) {
 
     success_b <- TRUE
     for (m in active_metrics) {
-      mean_errors_m <- metric_sums[[m]] / J
+      mean_errors_m <- metric_sums[[m]] / n_patients
       success_b <- success_b & all(mean_errors_m <= taus[[m]])
     }
     success[[b]] <- success_b
@@ -505,39 +505,57 @@ simulate_success_at_n_multi_patient <- function(alpha, n, J, config) {
 }
 
 
-#' Simulate success-rate curve over the number of patients for one alpha.
+#' Simulate success-rate curves over sample size and patient counts for one alpha.
 #'
 #' @param alpha        Positive scalar baseline alpha.
-#' @param n            Total sample size per patient.
-#' @param J_values     Integer vector of patient counts.
+#' @param n_values     Numeric vector of sample sizes per patient; values are
+#'   rounded to integers before simulation.
+#' @param n_patients   Integer vector of patient counts.
 #' @param config       Multi-patient simulation configuration.
 #' @param seed_offset  Optional integer seed offset used when looping over
 #'   multiple scenarios externally.
 #'
-#' @return Data.frame with one row per `J`.
-simulate_success_curve_for_alpha_over_patients <- function(alpha, n, J_values, config, seed_offset = 0L) {
-  rows <- vector("list", length(J_values))
-  for (i in seq_along(J_values)) {
-    config_i <- config
-    if (!is.null(config$seed)) {
-      config_i$seed <- as.integer(config$seed + seed_offset + i - 1L)
-    }
+#' @return Data.frame with one row per `n` x `n_patients` combination.
+simulate_success_curve_for_alpha_over_n_and_patients <- function(alpha, n_values, n_patients, config, seed_offset = 0L) {
+  n_rows <- length(n_values) * length(n_patients)
+  rows <- vector("list", n_rows)
+  row_i <- 1L
 
-    sim_i <- simulate_success_at_n_multi_patient(
-      alpha = alpha,
-      n = n,
-      J = J_values[[i]],
-      config = config_i
-    )
-    rows[[i]] <- data.frame(
-      alpha = alpha,
-      n = as.integer(n),
-      J = as.integer(J_values[[i]]),
-      success_rate = sim_i$success_rate,
-      success_count = sim_i$success_count,
-      B = as.integer(config$B),
-      stringsAsFactors = FALSE
-    )
+  for (i in seq_along(n_values)) {
+    for (j in seq_along(n_patients)) {
+      n_i <- as.integer(round(n_values[[i]]))
+      config_i <- config
+      if (!is.null(config$seed)) {
+        config_i$seed <- as.integer(config$seed + seed_offset + row_i - 1L)
+      }
+
+      sim_i <- simulate_success_at_n_multi_patient(
+        alpha = alpha,
+        n = n_i,
+        n_patients = n_patients[[j]],
+        config = config_i
+      )
+      rows[[row_i]] <- data.frame(
+        alpha = alpha,
+        n = n_i,
+        n_patients = as.integer(n_patients[[j]]),
+        success_rate = sim_i$success_rate,
+        success_count = sim_i$success_count,
+        B = as.integer(config$B),
+        stringsAsFactors = FALSE
+      )
+      row_i <- row_i + 1L
+    }
   }
   do.call(rbind, rows)
+}
+
+simulate_success_curve_for_alpha_over_patients <- function(alpha, n_values, n_patients, config, seed_offset = 0L) {
+  simulate_success_curve_for_alpha_over_n_and_patients(
+    alpha = alpha,
+    n_values = n_values,
+    n_patients = n_patients,
+    config = config,
+    seed_offset = seed_offset
+  )
 }

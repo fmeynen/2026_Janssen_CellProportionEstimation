@@ -238,7 +238,8 @@ plot_argmax_histogram <- function(result, metric, alphas = NULL, p_maxs = NULL) 
   argmax_plot
 }
 
-plot_success_rate_vs_n <- function(result, target = NULL, smooth = FALSE) {
+plot_success_rate_vs_n <- function(result, target = NULL, smooth = FALSE,
+                                   color_by = c("alpha", "n_patients")) {
   if (is.list(result) && "curves" %in% names(result)) {
     df <- result$curves
     if (is.null(target) && "inputs" %in% names(result) && "success_rate_target" %in% names(result$inputs)) {
@@ -256,25 +257,50 @@ plot_success_rate_vs_n <- function(result, target = NULL, smooth = FALSE) {
       call. = FALSE
     )
   }
-  
-  p <- ggplot2::ggplot(
-    df,
-    ggplot2::aes(
-      x = n,
-      y = success_rate,
-      color = factor(alpha),
-      group = factor(alpha)
-    )
-  ) +
-    (if (smooth) ggplot2::geom_smooth() else ggplot2::geom_line()) +
-    ggplot2::geom_point() +
-    ggplot2::labs(
-      x = "Sample size (n)",
-      y = "Success rate",
-      color = "alpha",
-      title = "Success-rate curves vs sample size"
+
+  color_by <- match.arg(color_by)
+  if (identical(color_by, "n_patients")) {
+    if (!("n_patients" %in% names(df))) {
+      stop("result is missing required column: n_patients.", call. = FALSE)
+    }
+    p <- ggplot2::ggplot(
+      df,
+      ggplot2::aes(
+        x = n,
+        y = success_rate,
+        color = factor(n_patients),
+        group = factor(n_patients)
+      )
     ) +
-    ggplot2::theme_bw()
+      (if (smooth) ggplot2::geom_smooth() else ggplot2::geom_line()) +
+      ggplot2::geom_point() +
+      ggplot2::labs(
+        x = "Sample size (n)",
+        y = "Success rate",
+        color = "n_patients",
+        title = "Success-rate curves vs sample size"
+      ) +
+      ggplot2::theme_bw()
+  } else {
+    p <- ggplot2::ggplot(
+      df,
+      ggplot2::aes(
+        x = n,
+        y = success_rate,
+        color = factor(alpha),
+        group = factor(alpha)
+      )
+    ) +
+      (if (smooth) ggplot2::geom_smooth() else ggplot2::geom_line()) +
+      ggplot2::geom_point() +
+      ggplot2::labs(
+        x = "Sample size (n)",
+        y = "Success rate",
+        color = "alpha",
+        title = "Success-rate curves vs sample size"
+      ) +
+      ggplot2::theme_bw()
+  }
   
   if (!is.null(target)) {
     p <- p + ggplot2::geom_hline(yintercept = target, linetype = "dotted")
@@ -284,52 +310,23 @@ plot_success_rate_vs_n <- function(result, target = NULL, smooth = FALSE) {
 }
 
 plot_success_rate_vs_patients <- function(result, target = NULL, smooth = FALSE) {
+  .Deprecated(new = "plot_success_rate_vs_n")
   if (is.list(result) && "curves" %in% names(result)) {
-    df <- result$curves
-    if (is.null(target) && "inputs" %in% names(result) && "success_rate_target" %in% names(result$inputs)) {
-      target <- result$inputs$success_rate_target
+    if ("J" %in% names(result$curves) && !("n_patients" %in% names(result$curves))) {
+      result$curves$n_patients <- result$curves$J
     }
-  } else {
-    df <- result
+    if (!("n_patients" %in% names(result$curves))) {
+      stop("result$curves must contain either n_patients or legacy J.", call. = FALSE)
+    }
+  } else if (is.data.frame(result)) {
+    if ("J" %in% names(result) && !("n_patients" %in% names(result))) {
+      result$n_patients <- result$J
+    }
+    if (!("n_patients" %in% names(result))) {
+      stop("result must contain either n_patients or legacy J.", call. = FALSE)
+    }
   }
-
-  required_cols <- c("alpha", "J", "success_rate")
-  missing_cols <- setdiff(required_cols, names(df))
-  if (length(missing_cols) > 0L) {
-    stop(
-      sprintf("result is missing required columns: %s", paste(missing_cols, collapse = ", ")),
-      call. = FALSE
-    )
-  }
-
-  if (!("n" %in% names(df))) {
-    df$n <- NA_integer_
-  }
-
-  p <- ggplot2::ggplot(
-    df,
-    ggplot2::aes(
-      x = J,
-      y = success_rate,
-      color = factor(alpha),
-      group = interaction(alpha, n)
-    )
-  ) +
-    (if (smooth) ggplot2::geom_smooth() else ggplot2::geom_line()) +
-    ggplot2::geom_point() +
-    ggplot2::labs(
-      x = "Number of patients (J)",
-      y = "Success rate",
-      color = "alpha",
-      title = "Success-rate curves vs number of patients"
-    ) +
-    ggplot2::theme_bw()
-
-  if (!is.null(target)) {
-    p <- p + ggplot2::geom_hline(yintercept = target, linetype = "dotted")
-  }
-
-  p
+  plot_success_rate_vs_n(result = result, target = target, smooth = smooth, color_by = "n_patients")
 }
 
 
@@ -430,4 +427,3 @@ plot_hybrid_best_cutoff_heatmap <- function(phat_mat, p, cutoffs,
     ) +
     ggplot2::theme_bw()
 }
-

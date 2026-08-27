@@ -14,8 +14,8 @@ lapply(simulation_helper_files, function(f) {
 sim_success_curve_multiple_patients_defaults <- function() {
   list(
     alpha = 2.5,
-    n = 10000L, # sample size (# of cells) per patient
-    J_values = c(1L, 2L, 5L, 10L, 20L, 50L, 100L),
+    n_values = 10^seq(from = 3, to = 5, by = 0.5), # sample size (# of cells) per patient
+    n_patients = c(1L, 2L, 5L, 10L, 20L, 50L, 100L),
     alpha_sigma = 0.3,
     alpha_min = 1 + 1e-8,
     K = 10L, # number of cell types
@@ -32,7 +32,7 @@ sim_success_curve_multiple_patients_defaults <- function() {
 
 validate_sim_success_curve_multiple_patients_config <- function(config) {
   required_fields <- c(
-    "alpha", "n", "J_values", "alpha_sigma", "alpha_min", "K", "B", "taus", "metrics",
+    "alpha", "n_values", "n_patients", "alpha_sigma", "alpha_min", "K", "B", "taus", "metrics",
     "model", "tie_method", "proportion_method", "seed"
   )
   missing_fields <- setdiff(required_fields, names(config))
@@ -46,12 +46,13 @@ validate_sim_success_curve_multiple_patients_config <- function(config) {
   if (!is.numeric(config$alpha) || length(config$alpha) != 1L || !is.finite(config$alpha) || config$alpha <= 0) {
     stop("config$alpha must be a single positive numeric value.", call. = FALSE)
   }
-  if (!is.numeric(config$n) || length(config$n) != 1L || !is.finite(config$n) || config$n %% 1 != 0 || config$n < 1L) {
-    stop("config$n must be a single integer >= 1.", call. = FALSE)
+  if (!is.numeric(config$n_values) || length(config$n_values) < 1L ||
+      any(!is.finite(config$n_values)) || any(config$n_values < 1L)) {
+    stop("config$n_values must be a non-empty numeric vector of values >= 1.", call. = FALSE)
   }
-  if (!is.numeric(config$J_values) || length(config$J_values) < 1L || any(!is.finite(config$J_values)) ||
-      any(config$J_values %% 1 != 0) || any(config$J_values < 1L)) {
-    stop("config$J_values must be a non-empty numeric vector of integers >= 1.", call. = FALSE)
+  if (!is.numeric(config$n_patients) || length(config$n_patients) < 1L || any(!is.finite(config$n_patients)) ||
+      any(config$n_patients %% 1 != 0) || any(config$n_patients < 1L)) {
+    stop("config$n_patients must be a non-empty numeric vector of integers >= 1.", call. = FALSE)
   }
   if (!is.numeric(config$alpha_sigma) || length(config$alpha_sigma) != 1L ||
       !is.finite(config$alpha_sigma) || config$alpha_sigma < 0) {
@@ -105,10 +106,10 @@ run_simulation_success_curve_multiple_patients <- function(config = sim_success_
     return(readRDS(path))
   }
 
-  curves <- simulate_success_curve_for_alpha_over_patients(
+  curves <- simulate_success_curve_for_alpha_over_n_and_patients(
     alpha = config$alpha,
-    n = as.integer(config$n),
-    J_values = as.integer(config$J_values),
+    n_values = config$n_values,
+    n_patients = as.integer(config$n_patients),
     config = config
   )
   rownames(curves) <- NULL
@@ -129,9 +130,10 @@ run_simulation_success_curve_multiple_patients <- function(config = sim_success_
 # Perform simulation ----------------------------------------------------------------------------------------------
 ## Configuration
 cfg <- sim_success_curve_multiple_patients_defaults()
-cfg$J_values <- c(1L, 2L, 5L, 10L, 20L, 50L)
+cfg$n_values <- 10^seq(from = 3, to = 5, by = 0.05)
+cfg$n_patients <- c(1L, 2L, 5L, 10L, 20L, 50L)
 cfg$B <- 1000L
 ## Simulation
 result <- run_simulation_success_curve_multiple_patients(cfg)
 
-plot_success_rate_vs_patients(result, target = 0.95, smooth = FALSE)
+plot_success_rate_vs_n(result, target = 0.95, smooth = FALSE, color_by = "n_patients")
