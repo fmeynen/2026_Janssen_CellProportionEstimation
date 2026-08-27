@@ -239,7 +239,8 @@ plot_argmax_histogram <- function(result, metric, alphas = NULL, p_maxs = NULL) 
 }
 
 plot_success_rate_vs_n <- function(result, target = NULL, smooth = FALSE,
-                                   color_by = c("alpha", "n_patients")) {
+                                   color_by = c("alpha", "n_patients"),
+                                   facet_by_alpha = FALSE) {
   if (is.list(result) && "curves" %in% names(result)) {
     df <- result$curves
     if (is.null(target) && "inputs" %in% names(result) && "success_rate_target" %in% names(result$inputs)) {
@@ -304,6 +305,10 @@ plot_success_rate_vs_n <- function(result, target = NULL, smooth = FALSE,
   
   if (!is.null(target)) {
     p <- p + ggplot2::geom_hline(yintercept = target, linetype = "dotted")
+  }
+
+  if (isTRUE(facet_by_alpha)) {
+    p <- p + ggplot2::facet_wrap(~alpha)
   }
   
   p

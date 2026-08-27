@@ -13,7 +13,7 @@ lapply(simulation_helper_files, function(f) {
 
 sim_success_curve_multiple_patients_defaults <- function() {
   list(
-    alpha = 2.5,
+    alpha = c(2, 2.5, 3, 4, 5),
     n_values = 10^seq(from = 3, to = 5, by = 0.5), # sample size (# of cells) per patient
     n_patients = c(1L, 2L, 3L, 5L),
     alpha_sigma = 0.1,
@@ -43,8 +43,8 @@ validate_sim_success_curve_multiple_patients_config <- function(config) {
     )
   }
 
-  if (!is.numeric(config$alpha) || length(config$alpha) != 1L || !is.finite(config$alpha) || config$alpha <= 0) {
-    stop("config$alpha must be a single positive numeric value.", call. = FALSE)
+  if (!is.numeric(config$alpha) || length(config$alpha) < 1L || any(!is.finite(config$alpha)) || any(config$alpha <= 0)) {
+    stop("config$alpha must be a non-empty numeric vector of positive values.", call. = FALSE)
   }
   if (!is.numeric(config$n_values) || length(config$n_values) < 1L ||
       any(!is.finite(config$n_values)) || any(config$n_values < 1L)) {
@@ -106,12 +106,22 @@ run_simulation_success_curve_multiple_patients <- function(config = sim_success_
     return(readRDS(path))
   }
 
-  curves <- simulate_success_curve_for_alpha_over_n_and_patients(
-    alpha = config$alpha,
-    n_values = config$n_values,
-    n_patients = as.integer(config$n_patients),
-    config = config
-  )
+  alpha_values <- config$alpha
+  n_values <- config$n_values
+  n_patients <- as.integer(config$n_patients)
+  curves_list <- vector("list", length(alpha_values))
+
+  for (a in seq_along(alpha_values)) {
+    seed_offset <- (a - 1L) * length(n_values) * length(n_patients)
+    curves_list[[a]] <- simulate_success_curve_for_alpha_over_n_and_patients(
+      alpha = alpha_values[[a]],
+      n_values = n_values,
+      n_patients = n_patients,
+      config = config,
+      seed_offset = seed_offset
+    )
+  }
+  curves <- do.call(rbind, curves_list)
   rownames(curves) <- NULL
 
   if ("success_rate_target" %in% names(config)) {
@@ -135,4 +145,4 @@ cfg$B <- 1000L
 ## Simulation
 result <- run_simulation_success_curve_multiple_patients(cfg)
 
-plot_success_rate_vs_n(result, target = 0.95, smooth = FALSE, color_by = "n_patients")
+plot_success_rate_vs_n(result, target = 0.95, smooth = FALSE, color_by = "n_patients", facet_by_alpha = TRUE)
