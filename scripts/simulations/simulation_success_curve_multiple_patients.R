@@ -140,7 +140,8 @@ run_simulation_success_curve_multiple_patients <- function(config = sim_success_
 # Perform simulation ----------------------------------------------------------------------------------------------
 ## Configuration
 cfg <- sim_success_curve_multiple_patients_defaults()
-cfg$n_values <- 10^seq(from = 3, to = 4, by = 0.05)
+cfg$n_values <- 10^seq(from = 3, to = 7, by = 0.2)
+cfg$alpha <- c(3, 3.5, 4, 4.5, 5, 6)
 cfg$B <- 1000L
 ## Simulation
 result <- run_simulation_success_curve_multiple_patients(cfg)
