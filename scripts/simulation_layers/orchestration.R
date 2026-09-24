@@ -44,6 +44,147 @@ simulation_result_path <- function(config, dir, name) {
   file.path(dir, paste0(name, "_", hash_config(config), ".rds"))
 }
 
+run_dirichlet_multinomial_experiment <- function(alpha, K, B, metrics,
+                                                 proportion_method = "beta", p_max = NULL,
+                                                 n_people, n_per_person,
+                                                 concentration,
+                                                 required_person_fraction,
+                                                 seed) {
+  n_people                 <- validate_positive_integer(n_people, "n_people", allow_vector = TRUE)
+  n_per_person             <- validate_positive_integer(n_per_person, "n_per_person")
+  concentration            <- validate_positive_numeric(concentration, "concentration", allow_vector = TRUE )
+  required_person_fraction <- validate_required_person_fraction(required_person_fraction)
+  
+  if (identical(proportion_method, "fixed_max_beta")) {
+    if (is.null(p_max)) {
+      stop("p_max must be provided when proportion_method = 'fixed_max_beta'.", call. = FALSE)
+    }
+    if (!is.numeric(p_max) || any(!is.finite(p_max)) || any(p_max <= 0) || any(p_max >= 1)) {
+      stop("p_max must contain numbers strictly between 0 and 1.", call. = FALSE)
+    }
+    p_max_values <- as.numeric(p_max)
+  } else {
+    p_max_values <- NA_real_
+  }
+
+  population_scenarios <- expand.grid(
+    alpha = alpha,
+    p_max = p_max_values,
+    KEEP.OUT.ATTRS = FALSE,
+    stringsAsFactors = FALSE
+  )
+  person_scenarios <- expand.grid(
+    n_people = n_people,
+    concentration = concentration,
+    KEEP.OUT.ATTRS = FALSE,
+    stringsAsFactors = FALSE
+  )
+  scenario_grid <- merge(
+    population_scenarios,
+    person_scenarios,
+    by = NULL,
+    sort = FALSE
+  )
+  scenario_grid$scenario_id <- paste0("scenario_", seq_len(nrow(scenario_grid)))
+
+  p_table_list <- vector("list", nrow(scenario_grid))
+  person_results_list <- vector("list", nrow(scenario_grid))
+  keep <- logical(nrow(scenario_grid))
+  population_compositions <- list()
+  impossible_population_keys <- character()
+  skip_impossible <- identical(proportion_method, "fixed_max_beta") &&
+    length(p_max_values) > 1L
+
+  for (i in seq_len(nrow(scenario_grid))) {
+    scenario <- scenario_grid[i, , drop = FALSE]
+    population_key <- paste(
+      format(scenario$alpha[[1L]], scientific = FALSE, trim = TRUE),
+      if (is.na(scenario$p_max[[1L]])) "NA" else format(scenario$p_max[[1L]], scientific = FALSE, trim = TRUE),
+      sep = "__"
+    )
+    if (population_key %in% impossible_population_keys) next
+    p <- population_compositions[[population_key]]
+    if (is.null(p)) {
+      p <- tryCatch(
+        generate_proportions(
+          alpha = scenario$alpha[[1L]],
+          K = K,
+          method = proportion_method,
+          p_max = if (is.na(scenario$p_max[[1L]])) NULL else scenario$p_max[[1L]]
+        ),
+        error = function(e) {
+          if (skip_impossible && inherits(e, "impossible_fixed_max_error")) {
+            return(NULL)
+          }
+          stop(e)
+        }
+      )
+      if (!is.null(p)) {
+        population_compositions[[population_key]] <- p
+      }
+    }
+    if (is.null(p)) {
+      impossible_population_keys <- c(impossible_population_keys, population_key)
+    }
+    if (is.null(p)) next
+
+    rep_out <- run_replicates(
+      p = p,
+      B = B,
+      metrics = metrics,
+      model = "dirichlet_multinomial",
+      seed = if (is.null(seed)) NULL else seed + i - 1L,
+      n_people = scenario$n_people[[1L]],
+      n_per_person = n_per_person,
+      concentration = scenario$concentration[[1L]],
+      scenario_id = scenario$scenario_id[[1L]]
+    )
+    person_results <- rep_out$person_results
+    person_results$alpha <- scenario$alpha[[1L]]
+    person_results$p_max <- scenario$p_max[[1L]]
+    person_results_list[[i]] <- person_results[, c(
+      "scenario_id", "alpha", "p_max", "n_people", "concentration",
+      "replicate", "person_id", "cell_type", "metric", "count",
+      "observed_proportion", "person_true_proportion",
+      "population_mean_proportion", "error"
+    )]
+    p_table_list[[i]] <- data.frame(
+      scenario_id = scenario$scenario_id[[1L]],
+      alpha = scenario$alpha[[1L]],
+      p_max = scenario$p_max[[1L]],
+      n_people = scenario$n_people[[1L]],
+      concentration = scenario$concentration[[1L]],
+      as.list(stats::setNames(as.numeric(p), paste0("index_", seq_len(K)))),
+      stringsAsFactors = FALSE,
+      check.names = FALSE
+    )
+    keep[[i]] <- TRUE
+  }
+
+  if (!any(keep)) {
+    stop("No feasible alpha/p_max combinations produced simulation output.", call. = FALSE)
+  }
+
+  list(
+    inputs = list(
+      alpha = alpha,
+      K = K,
+      B = B,
+      metrics = metrics,
+      proportion_method = proportion_method,
+      p_max = p_max,
+      model = "dirichlet_multinomial",
+      n_people = n_people,
+      n_per_person = n_per_person,
+      concentration = concentration,
+      required_person_fraction = required_person_fraction,
+      seed = seed
+    ),
+    p_table = do.call(rbind, p_table_list[keep]),
+    person_results = do.call(rbind, person_results_list[keep])
+  )
+}
+
 
 # Original Simulation ---------------------------------------------------------------------------------------------
 
@@ -52,7 +193,8 @@ simulation_result_path <- function(config, dir, name) {
 #' @param alpha      Numeric vector; one or more positive shape values used by the selected proportion-generation method
 #'      (default method is Beta-based).
 #' @param K          Number of cell types (default 10).
-#' @param n          Total sample size per replicate.
+#' @param n          Total sample size per replicate for the multinomial
+#'   model.
 #' @param B          Number of replicates.
 #' @param taus       Numeric vector of thresholds (same for all metrics) or a named list with one numeric vector per
 #'      metric (e.g. `list(AE = c(...), ARE = c(...))`).
@@ -63,7 +205,16 @@ simulation_result_path <- function(config, dir, name) {
 #'      Can be a numeric vector.
 #'      When multiple values are provided, all alpha × p_max combinations are attempted; impossible fixed-max
 #'      combinations are warned and skipped.
-#' @param model      Sampling model (currently only "multinomial").
+#' @param model      Sampling model (`"multinomial"` or
+#'   `"dirichlet_multinomial"`).
+#' @param n_people   Positive integer vector of people per replicate for the
+#'   Dirichlet-multinomial model.
+#' @param n_per_person Positive integer sampled-cell count for every person
+#'   in the Dirichlet-multinomial model.
+#' @param concentration Positive numeric vector of Dirichlet concentration
+#'   values for the Dirichlet-multinomial model.
+#' @param required_person_fraction Fraction of people required to pass all
+#'   active scalar thresholds in the success runner; defaults to `1`.
 #' @param tie_method Tie-breaking rule for max-error argmax.
 #' @param seed       Optional integer seed for reproducibility.
 #' @param ...        Additional arguments forwarded to `simulate_counts()`.
@@ -85,14 +236,39 @@ simulation_result_path <- function(config, dir, name) {
 #'     \item{argmax_summary}{Tidy data.frame:
 #'       alpha, p_max, metric, index, count, fraction, p_value.}
 #'   }
-run_simulation_experiment <- function(alpha, K = 10, n, B, taus,
+run_simulation_experiment <- function(alpha, K = 10, n = NULL, B, taus,
                                       metrics = c("AE", "ARE"),
                                       proportion_method = "beta",
                                       p_max = NULL,
                                       model = "multinomial",
                                       tie_method = "random",
-                                      seed = NULL, ...) {
+                                      seed = NULL,
+                                      n_people = NULL,
+                                      n_per_person = NULL,
+                                      concentration = NULL,
+                                      required_person_fraction = 1,
+                                      ...) {
   stopifnot(is.numeric(alpha), length(alpha) >= 1L, all(alpha > 0))
+  model <- match.arg(model, c("multinomial", "dirichlet_multinomial"))
+
+  if (identical(model, "dirichlet_multinomial")) {
+    return(run_dirichlet_multinomial_experiment(
+      alpha = alpha,
+      K = K,
+      B = B,
+      metrics = metrics,
+      proportion_method = proportion_method,
+      p_max = p_max,
+      n_people = n_people,
+      n_per_person = n_per_person,
+      concentration = concentration,
+      required_person_fraction = required_person_fraction,
+      seed = seed
+    ))
+  }
+  if (is.null(n)) {
+    stop("n must be provided for model = 'multinomial'.", call. = FALSE)
+  }
 
   if (identical(proportion_method, "fixed_max_beta")) {
     if (is.null(p_max)) {
@@ -211,7 +387,9 @@ run_simulation_experiment <- function(alpha, K = 10, n, B, taus,
 #' @param proportion_method Proportion-generation method (`"beta"` or
 #'   `"fixed_max_beta"`).
 #' @param p_max             Optional fixed largest true proportion(s).
-#' @param model             Sampling model passed to `run_simulation_experiment()`.
+#' @param model             Sampling model passed to `run_simulation_experiment()`;
+#'   `"dirichlet_multinomial"` is not supported because this analysis assumes
+#'   one observed composition and one truth vector per replicate.
 #' @param tie_method        Tie-breaking rule for max-error argmax.
 #' @param maximize          Which success rate to maximize (`"cell"` or
 #'   `"replicate"`).
@@ -236,6 +414,12 @@ run_simulation_hybrid_cutoff_experiment <- function(alpha, K, n, B, cutoffs,
                                                      maximize = c("cell", "replicate"),
                                                      seed = NULL, ...) {
   maximize <- match.arg(maximize)
+  if (identical(model, "dirichlet_multinomial")) {
+    stop(
+      "run_simulation_hybrid_cutoff_experiment() does not support model = 'dirichlet_multinomial'; hybrid cutoff analysis requires one observed composition and truth vector per replicate.",
+      call. = FALSE
+    )
+  }
   sim_out <- run_simulation_experiment(
     alpha = alpha,
     K = K,

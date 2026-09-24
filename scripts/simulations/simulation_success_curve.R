@@ -19,6 +19,9 @@ sim_success_curve_defaults <- function() {
     taus = list(AE = 0.02, ARE = 0.5), #AE = absolute error, ARE = absolute relative error
     metrics = c("AE", "ARE"), 
     model = "multinomial",
+    n_people = NULL,
+    concentration = NULL,
+    required_person_fraction = 1,
     tie_method = "random",
     proportion_method = "beta",
     seed = 260925L,
@@ -53,6 +56,14 @@ validate_sim_success_curve_config <- function(config) {
   }
   if (!is.character(config$metrics) || length(config$metrics) < 1L || any(is.na(config$metrics))) {
     stop("config$metrics must be a non-empty character vector.", call. = FALSE)
+  }
+  if (!identical(config$model, "multinomial") && !identical(config$model, "dirichlet_multinomial")) {
+    stop("config$model must be 'multinomial' or 'dirichlet_multinomial'.", call. = FALSE)
+  }
+  if (identical(config$model, "dirichlet_multinomial")) {
+    validate_positive_integer(config$n_people, "config$n_people")
+    validate_positive_numeric(config$concentration, "config$concentration")
+    validate_required_person_fraction(config$required_person_fraction)
   }
   if (!is.list(config$taus) || is.null(names(config$taus))) {
     stop("config$taus must be a named list.", call. = FALSE)
@@ -127,4 +138,3 @@ cfg$B        <- 10000
 result <- run_simulation_success_curve(cfg)
 
 plot_success_rate_vs_n(result, target = 0.95, smooth = FALSE)
-

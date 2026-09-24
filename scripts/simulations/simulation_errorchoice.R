@@ -12,7 +12,6 @@
 #   4. Summarise which cell type most often drives the max error.
 #
 # Possible future changes:
-#   * Allow overdispersion  -> model = "dirichlet_multinomial"
 #   * Allow correlations    -> model = "logistic_normal_multinomial"
 #   * Other monotone curves (exponential, power, ...)
 #   * Additional error metrics
@@ -37,6 +36,10 @@ simulation_errorchoice_defaults <- function() {
     taus = list(AE = taus_AE, ARE = taus_ARE, TSE = taus_TSE, LAE = taus_LAE),
     metrics = c("AE", "ARE", "LAE", "TSE"),
     model = "multinomial",
+    n_people = NULL,
+    n_per_person = NULL,
+    concentration = NULL,
+    required_person_fraction = 1,
     tie_method = "random",
     proportion_method = "beta",
     #p_max = c(0.2, 0.3,0.4, 0.5),
@@ -67,6 +70,10 @@ run_simulation_errorchoice <- function(config = simulation_errorchoice_defaults(
     taus = config$taus,
     metrics = config$metrics,
     model = config$model,
+    n_people = config$n_people,
+    n_per_person = config$n_per_person,
+    concentration = config$concentration,
+    required_person_fraction = config$required_person_fraction,
     tie_method = config$tie_method,
     proportion_method = config$proportion_method,
     p_max = config$p_max,
