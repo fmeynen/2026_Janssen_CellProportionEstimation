@@ -21,7 +21,6 @@ sim_success_curve_defaults <- function() {
     model = "multinomial",
     n_people = NULL,
     concentration = NULL,
-    required_person_fraction = 1,
     tie_method = "random",
     proportion_method = "beta",
     seed = 260925L,
@@ -63,7 +62,6 @@ validate_sim_success_curve_config <- function(config) {
   if (identical(config$model, "dirichlet_multinomial")) {
     validate_positive_integer(config$n_people, "config$n_people")
     validate_positive_numeric(config$concentration, "config$concentration")
-    validate_required_person_fraction(config$required_person_fraction)
   }
   if (!is.list(config$taus) || is.null(names(config$taus))) {
     stop("config$taus must be a named list.", call. = FALSE)

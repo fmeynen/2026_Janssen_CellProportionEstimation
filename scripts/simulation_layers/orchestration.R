@@ -1,9 +1,7 @@
-
 # Orchestration ---------------------------------------------------------------------------------------------------
 # Orchestration layer: high-level experiment runners that coordinate all other layers.
 #
 # Depends on: simulation.R, calculation.R, extraction.R
-
 
 # Simulation - I/O -------------------------------------------------------------------------------------------------
 
@@ -11,7 +9,6 @@
 #
 # Each unique combination of simulation parameters is saved as a separate .rds file whose name contains a short MD5 hash
 # of those parameters.
-
 
 #' Compute an MD5 hash of an R object.
 #'
@@ -44,23 +41,48 @@ simulation_result_path <- function(config, dir, name) {
   file.path(dir, paste0(name, "_", hash_config(config), ".rds"))
 }
 
-run_dirichlet_multinomial_experiment <- function(alpha, K, B, metrics,
-                                                 proportion_method = "beta", p_max = NULL,
-                                                 n_people, n_per_person,
-                                                 concentration,
-                                                 required_person_fraction,
-                                                 seed) {
-  n_people                 <- validate_positive_integer(n_people, "n_people", allow_vector = TRUE)
-  n_per_person             <- validate_positive_integer(n_per_person, "n_per_person")
-  concentration            <- validate_positive_numeric(concentration, "concentration", allow_vector = TRUE )
-  required_person_fraction <- validate_required_person_fraction(required_person_fraction)
-  
+# Run individual experiments --------------------------------------------------------------------------------------
+run_dirichlet_multinomial_experiment <- function(
+  alpha,
+  K,
+  B,
+  metrics,
+  proportion_method = "beta",
+  p_max = NULL,
+  n_people,
+  n_per_person,
+  concentration,
+  seed
+) {
+  n_people <- validate_positive_integer(
+    n_people,
+    "n_people",
+    allow_vector = TRUE
+  )
+  n_per_person <- validate_positive_integer(n_per_person, "n_per_person")
+  concentration <- validate_positive_numeric(
+    concentration,
+    "concentration",
+    allow_vector = TRUE
+  )
+
   if (identical(proportion_method, "fixed_max_beta")) {
     if (is.null(p_max)) {
-      stop("p_max must be provided when proportion_method = 'fixed_max_beta'.", call. = FALSE)
+      stop(
+        "p_max must be provided when proportion_method = 'fixed_max_beta'.",
+        call. = FALSE
+      )
     }
-    if (!is.numeric(p_max) || any(!is.finite(p_max)) || any(p_max <= 0) || any(p_max >= 1)) {
-      stop("p_max must contain numbers strictly between 0 and 1.", call. = FALSE)
+    if (
+      !is.numeric(p_max) ||
+        any(!is.finite(p_max)) ||
+        any(p_max <= 0) ||
+        any(p_max >= 1)
+    ) {
+      stop(
+        "p_max must contain numbers strictly between 0 and 1.",
+        call. = FALSE
+      )
     }
     p_max_values <- as.numeric(p_max)
   } else {
@@ -99,10 +121,16 @@ run_dirichlet_multinomial_experiment <- function(alpha, K, B, metrics,
     scenario <- scenario_grid[i, , drop = FALSE]
     population_key <- paste(
       format(scenario$alpha[[1L]], scientific = FALSE, trim = TRUE),
-      if (is.na(scenario$p_max[[1L]])) "NA" else format(scenario$p_max[[1L]], scientific = FALSE, trim = TRUE),
+      if (is.na(scenario$p_max[[1L]])) {
+        "NA"
+      } else {
+        format(scenario$p_max[[1L]], scientific = FALSE, trim = TRUE)
+      },
       sep = "__"
     )
-    if (population_key %in% impossible_population_keys) next
+    if (population_key %in% impossible_population_keys) {
+      next
+    }
     p <- population_compositions[[population_key]]
     if (is.null(p)) {
       p <- tryCatch(
@@ -110,7 +138,11 @@ run_dirichlet_multinomial_experiment <- function(alpha, K, B, metrics,
           alpha = scenario$alpha[[1L]],
           K = K,
           method = proportion_method,
-          p_max = if (is.na(scenario$p_max[[1L]])) NULL else scenario$p_max[[1L]]
+          p_max = if (is.na(scenario$p_max[[1L]])) {
+            NULL
+          } else {
+            scenario$p_max[[1L]]
+          }
         ),
         error = function(e) {
           if (skip_impossible && inherits(e, "impossible_fixed_max_error")) {
@@ -124,9 +156,14 @@ run_dirichlet_multinomial_experiment <- function(alpha, K, B, metrics,
       }
     }
     if (is.null(p)) {
-      impossible_population_keys <- c(impossible_population_keys, population_key)
+      impossible_population_keys <- c(
+        impossible_population_keys,
+        population_key
+      )
     }
-    if (is.null(p)) next
+    if (is.null(p)) {
+      next
+    }
 
     rep_out <- run_replicates(
       p = p,
@@ -143,10 +180,20 @@ run_dirichlet_multinomial_experiment <- function(alpha, K, B, metrics,
     person_results$alpha <- scenario$alpha[[1L]]
     person_results$p_max <- scenario$p_max[[1L]]
     person_results_list[[i]] <- person_results[, c(
-      "scenario_id", "alpha", "p_max", "n_people", "concentration",
-      "replicate", "person_id", "cell_type", "metric", "count",
-      "observed_proportion", "person_true_proportion",
-      "population_mean_proportion", "error"
+      "scenario_id",
+      "alpha",
+      "p_max",
+      "n_people",
+      "concentration",
+      "replicate",
+      "person_id",
+      "cell_type",
+      "metric",
+      "count",
+      "observed_proportion",
+      "person_true_proportion",
+      "population_mean_proportion",
+      "error"
     )]
     p_table_list[[i]] <- data.frame(
       scenario_id = scenario$scenario_id[[1L]],
@@ -162,7 +209,10 @@ run_dirichlet_multinomial_experiment <- function(alpha, K, B, metrics,
   }
 
   if (!any(keep)) {
-    stop("No feasible alpha/p_max combinations produced simulation output.", call. = FALSE)
+    stop(
+      "No feasible alpha/p_max combinations produced simulation output.",
+      call. = FALSE
+    )
   }
 
   list(
@@ -177,7 +227,6 @@ run_dirichlet_multinomial_experiment <- function(alpha, K, B, metrics,
       n_people = n_people,
       n_per_person = n_per_person,
       concentration = concentration,
-      required_person_fraction = required_person_fraction,
       seed = seed
     ),
     p_table = do.call(rbind, p_table_list[keep]),
@@ -213,8 +262,6 @@ run_dirichlet_multinomial_experiment <- function(alpha, K, B, metrics,
 #'   in the Dirichlet-multinomial model.
 #' @param concentration Positive numeric vector of Dirichlet concentration
 #'   values for the Dirichlet-multinomial model.
-#' @param required_person_fraction Fraction of people required to pass all
-#'   active scalar thresholds in the success runner; defaults to `1`.
 #' @param tie_method Tie-breaking rule for max-error argmax.
 #' @param seed       Optional integer seed for reproducibility.
 #' @param ...        Additional arguments forwarded to `simulate_counts()`.
@@ -236,18 +283,23 @@ run_dirichlet_multinomial_experiment <- function(alpha, K, B, metrics,
 #'     \item{argmax_summary}{Tidy data.frame:
 #'       alpha, p_max, metric, index, count, fraction, p_value.}
 #'   }
-run_simulation_experiment <- function(alpha, K = 10, n = NULL, B, taus,
-                                      metrics = c("AE", "ARE"),
-                                      proportion_method = "beta",
-                                      p_max = NULL,
-                                      model = "multinomial",
-                                      tie_method = "random",
-                                      seed = NULL,
-                                      n_people = NULL,
-                                      n_per_person = NULL,
-                                      concentration = NULL,
-                                      required_person_fraction = 1,
-                                      ...) {
+run_simulation_experiment <- function(
+  alpha,
+  K = 10,
+  n = NULL,
+  B,
+  taus,
+  metrics = c("AE", "ARE"),
+  proportion_method = "beta",
+  p_max = NULL,
+  model = "multinomial",
+  tie_method = "random",
+  seed = NULL,
+  n_people = NULL,
+  n_per_person = NULL,
+  concentration = NULL,
+  ...
+) {
   stopifnot(is.numeric(alpha), length(alpha) >= 1L, all(alpha > 0))
   model <- match.arg(model, c("multinomial", "dirichlet_multinomial"))
 
@@ -262,7 +314,6 @@ run_simulation_experiment <- function(alpha, K = 10, n = NULL, B, taus,
       n_people = n_people,
       n_per_person = n_per_person,
       concentration = concentration,
-      required_person_fraction = required_person_fraction,
       seed = seed
     ))
   }
@@ -272,10 +323,21 @@ run_simulation_experiment <- function(alpha, K = 10, n = NULL, B, taus,
 
   if (identical(proportion_method, "fixed_max_beta")) {
     if (is.null(p_max)) {
-      stop("p_max must be provided when proportion_method = 'fixed_max_beta'.", call. = FALSE)
+      stop(
+        "p_max must be provided when proportion_method = 'fixed_max_beta'.",
+        call. = FALSE
+      )
     }
-    if (!is.numeric(p_max) || any(!is.finite(p_max)) || any(p_max <= 0) || any(p_max >= 1)) {
-      stop("p_max must contain numbers strictly between 0 and 1.", call. = FALSE)
+    if (
+      !is.numeric(p_max) ||
+        any(!is.finite(p_max)) ||
+        any(p_max <= 0) ||
+        any(p_max >= 1)
+    ) {
+      stop(
+        "p_max must contain numbers strictly between 0 and 1.",
+        call. = FALSE
+      )
     }
     p_max_values <- as.numeric(p_max)
   } else {
@@ -296,7 +358,10 @@ run_simulation_experiment <- function(alpha, K = 10, n = NULL, B, taus,
   curves_list <- vector("list", n_combinations)
   argmax_summary_list <- vector("list", n_combinations)
   keep <- logical(n_combinations)
-  should_skip_impossible_combinations <- identical(proportion_method, "fixed_max_beta") &&
+  should_skip_impossible_combinations <- identical(
+    proportion_method,
+    "fixed_max_beta"
+  ) &&
     length(p_max_values) > 1L
 
   for (i in seq_len(n_combinations)) {
@@ -311,43 +376,86 @@ run_simulation_experiment <- function(alpha, K = 10, n = NULL, B, taus,
         p_max = if (is.na(p_max_i)) NULL else p_max_i
       ),
       error = function(e) {
-        if (should_skip_impossible_combinations && inherits(e, "impossible_fixed_max_error")) {
+        if (
+          should_skip_impossible_combinations &&
+            inherits(e, "impossible_fixed_max_error")
+        ) {
           return(NULL)
         }
         stop(e)
       }
     )
-    if (is.null(p)) next # Skip impossible alpha/p_max combinations caught by the error handler.
+    if (is.null(p)) {
+      next
+    } # Skip impossible alpha/p_max combinations caught by the error handler.
 
     rep_out <- run_replicates(
-      p, n, B, metrics = metrics, model = model,
-      tie_method = tie_method, seed = seed_i, ...
+      p,
+      n,
+      B,
+      metrics = metrics,
+      model = model,
+      tie_method = tie_method,
+      seed = seed_i,
+      ...
     )
     keep[[i]] <- TRUE
 
     p_table_list[[i]] <- extract_p_table_row(alpha_i, p_max_i, p, K)
 
     replicate_summaries_list[[i]] <- extract_replicate_summaries(
-      rep_out, alpha_i, p_max_i, B, metrics
+      rep_out,
+      alpha_i,
+      p_max_i,
+      B,
+      metrics
     )
 
-    errors_long_list[[i]] <- extract_errors_long(rep_out, alpha_i, p_max_i, B, metrics)
+    errors_long_list[[i]] <- extract_errors_long(
+      rep_out,
+      alpha_i,
+      p_max_i,
+      B,
+      metrics
+    )
 
     phat_long_list[[i]] <- extract_phat_long(rep_out, alpha_i, p_max_i, B)
 
-    curves_i <- evaluate_thresholds(rep_out$max_errors, taus, errors = rep_out$errors)
+    curves_i <- evaluate_thresholds(
+      rep_out$max_errors,
+      taus,
+      errors = rep_out$errors
+    )
     curves_i$alpha <- alpha_i
     curves_i$p_max <- p_max_i
-    curves_list[[i]] <- curves_i[, c("alpha", "p_max", "metric", "tau", "success_rate", "mean_n_above")]
+    curves_list[[i]] <- curves_i[, c(
+      "alpha",
+      "p_max",
+      "metric",
+      "tau",
+      "success_rate",
+      "mean_n_above"
+    )]
 
     argmax_i <- summarize_argmax(rep_out$argmax, p)
     argmax_i$alpha <- alpha_i
     argmax_i$p_max <- p_max_i
-    argmax_summary_list[[i]] <- argmax_i[, c("alpha", "p_max", "metric", "index", "count", "fraction", "p_value")]
+    argmax_summary_list[[i]] <- argmax_i[, c(
+      "alpha",
+      "p_max",
+      "metric",
+      "index",
+      "count",
+      "fraction",
+      "p_value"
+    )]
   }
 
   if (!any(keep)) {
-    stop("No feasible alpha/p_max combinations produced simulation output.", call. = FALSE)
+    stop(
+      "No feasible alpha/p_max combinations produced simulation output.",
+      call. = FALSE
+    )
   }
 
   p_table_list <- p_table_list[keep]
@@ -358,11 +466,19 @@ run_simulation_experiment <- function(alpha, K = 10, n = NULL, B, taus,
   argmax_summary_list <- argmax_summary_list[keep]
 
   list(
-    inputs = list(alpha = alpha, K = K, n = n, B = B, taus = taus,
-                  metrics = metrics, proportion_method = proportion_method,
-                  p_max = p_max,
-                  model = model,
-                  tie_method = tie_method, seed = seed),
+    inputs = list(
+      alpha = alpha,
+      K = K,
+      n = n,
+      B = B,
+      taus = taus,
+      metrics = metrics,
+      proportion_method = proportion_method,
+      p_max = p_max,
+      model = model,
+      tie_method = tie_method,
+      seed = seed
+    ),
     p_table = do.call(rbind, p_table_list),
     replicate_summaries = do.call(rbind, replicate_summaries_list),
     errors_long = do.call(rbind, errors_long_list),

@@ -534,6 +534,9 @@ run_replicates <- function(p, n = NULL, B,
 #'     \item{success_rate}{Numeric; fraction of successful replicates.}
 #'     \item{rep_out}{Raw output of `run_replicates()`.}
 #'   }
+# TODO: the Dirichlet-multinomial branch still uses the old per-person rule (a person passes if all cell-type errors are
+#   within tau; a replicate succeeds if `required_person_fraction` of people pass). Update it to the current definition
+#   used by `extract_success_rate()`: mean error over persons per cell type, max over cell types, <= tau for every metric.
 simulate_success_at_n <- function(alpha, n = NULL, config, n_per_person = NULL) {
   p <- generate_proportions(
     alpha  = alpha,

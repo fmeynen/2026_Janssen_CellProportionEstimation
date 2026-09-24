@@ -145,3 +145,101 @@ extract_phat_long <- function(rep_out, alpha_i, p_max_i, B) {
     stringsAsFactors = FALSE
   )
 }
+
+
+# Dirichlet-multinomial success rate ------------------------------------------------------------------------------
+
+
+#' Compute the per-replicate max-mean error for one metric of a Dirichlet-multinomial experiment.
+#'
+#' For each scenario and replicate, the error is averaged over all persons per cell type, and the largest of these
+#' cell-type means is returned. `NaN` errors (ARE with true and observed proportion both 0) count as 0; `Inf` errors are
+#' kept, so the corresponding mean is `Inf`.
+#'
+#' @param person_results `person_results` data.frame from `run_dirichlet_multinomial_experiment()`.
+#' @param metric         Metric name present in `person_results$metric`.
+#'
+#' @return Data.frame with columns: scenario_id, replicate, max_mean_error.
+dm_max_mean_errors <- function(person_results, metric) {
+  rows <- person_results[person_results$metric == metric, c("scenario_id", "replicate", "cell_type", "error")]
+  rows$error[is.nan(rows$error)] <- 0
+  cell_means <- stats::aggregate(error ~ scenario_id + replicate + cell_type, data = rows, FUN = mean,
+                                 na.action = stats::na.pass)
+  out <- stats::aggregate(error ~ scenario_id + replicate, data = cell_means, FUN = max,
+                          na.action = stats::na.pass)
+  names(out)[names(out) == "error"] <- "max_mean_error"
+  out
+}
+
+
+#' Extract the success rate per scenario from a Dirichlet-multinomial experiment.
+#'
+#' A replicate succeeds for a metric if the largest cell-type error, averaged over all persons, is `<= tau`. A replicate
+#' succeeds jointly if it succeeds for every metric in `taus`. The success rate is the fraction of successful replicates.
+#'
+#' @param result Output of `run_dirichlet_multinomial_experiment()` (or `run_simulation_experiment()` with
+#'   `model = "dirichlet_multinomial"`), in memory or read back with `readRDS()`.
+#' @param taus   Named list with one scalar threshold per metric (e.g. `list(AE = 0.02, ARE = 0.5)`). Metrics missing
+#'   from `result$person_results` are skipped with a warning.
+#'
+#' @return Data.frame with one row per scenario and columns: scenario_id, alpha, p_max, n_people, concentration, B,
+#'   success_count, success_rate (joint over all metrics), and `success_rate_<metric>` per metric.
+extract_success_rate <- function(result, taus) {
+  person_results <- result$person_results
+  if (!is.data.frame(person_results)) {
+    stop("result must contain a person_results data.frame (Dirichlet-multinomial experiment output).", call. = FALSE)
+  }
+  if (!is.list(taus) || is.null(names(taus)) || any(names(taus) == "")) {
+    stop("taus must be a named list with one scalar threshold per metric.", call. = FALSE)
+  }
+  for (m in names(taus)) {
+    if (!is.numeric(taus[[m]]) || length(taus[[m]]) != 1L || is.na(taus[[m]])) {
+      stop(sprintf("taus$%s must be a single numeric threshold.", m), call. = FALSE)
+    }
+  }
+
+  metrics <- names(taus)
+  missing_metrics <- setdiff(metrics, unique(person_results$metric))
+  for (m in missing_metrics) {
+    warning(sprintf("extract_success_rate: metric '%s' is not in person_results; it is skipped.", m), call. = FALSE)
+  }
+  metrics <- setdiff(metrics, missing_metrics)
+  if (length(metrics) == 0L) {
+    stop("None of the metrics in taus are present in person_results.", call. = FALSE)
+  }
+
+  replicate_pass <- NULL
+  for (m in metrics) {
+    max_means <- dm_max_mean_errors(person_results, m)
+    max_means[[paste0("pass_", m)]] <- max_means$max_mean_error <= taus[[m]]
+    max_means$max_mean_error <- NULL
+    replicate_pass <- if (is.null(replicate_pass)) {
+      max_means
+    } else {
+      merge(replicate_pass, max_means, by = c("scenario_id", "replicate"))
+    }
+  }
+  pass_cols <- paste0("pass_", metrics)
+  replicate_pass$pass <- Reduce(`&`, replicate_pass[pass_cols])
+
+  scenario_ids <- unique(replicate_pass$scenario_id)
+  summary_rows <- lapply(scenario_ids, function(id) {
+    rows <- replicate_pass[replicate_pass$scenario_id == id, , drop = FALSE]
+    out <- data.frame(
+      scenario_id = id,
+      B = nrow(rows),
+      success_count = sum(rows$pass),
+      success_rate = mean(rows$pass),
+      stringsAsFactors = FALSE
+    )
+    for (m in metrics) {
+      out[[paste0("success_rate_", m)]] <- mean(rows[[paste0("pass_", m)]])
+    }
+    out
+  })
+  summary <- do.call(rbind, summary_rows)
+
+  scenario_cols <- c("scenario_id", "alpha", "p_max", "n_people", "concentration")
+  out <- merge(result$p_table[, scenario_cols], summary, by = "scenario_id", sort = FALSE)
+  out[order(as.integer(sub("^scenario_", "", out$scenario_id))), , drop = FALSE]
+}
