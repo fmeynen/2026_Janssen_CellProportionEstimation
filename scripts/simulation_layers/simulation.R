@@ -133,10 +133,97 @@ simulate_counts_multinomial <- function(p, n) {
   as.integer(rmultinom(1L, size = n, prob = p))
 }
 
-# Placeholder: to be implemented when overdispersion support is added.
-# simulate_counts_dirichlet_multinomial <- function(p, n, concentration, ...) {
-#   stop("Dirichlet-multinomial not yet implemented.")
-# }
+validate_positive_integer <- function(x, name, allow_vector = FALSE) {
+  valid_length <- if (allow_vector) length(x) >= 1L else length(x) == 1L
+  if (!is.numeric(x) || !valid_length || any(!is.finite(x)) || any(x < 1L) || any(x %% 1 != 0)) {
+    expected <- if (allow_vector) {
+      "a non-empty vector of positive integers"
+    } else {
+      "a positive integer"
+    }
+    stop(sprintf("%s must be %s.", name, expected), call. = FALSE)
+  }
+  as.integer(x)
+}
+
+validate_positive_numeric <- function(x, name, allow_vector = FALSE) {
+  valid_length <- if (allow_vector) length(x) >= 1L else length(x) == 1L
+  if (!is.numeric(x) || !valid_length || any(!is.finite(x)) || any(x <= 0)) {
+    expected <- if (allow_vector) {
+      "a non-empty vector of positive finite numbers"
+    } else {
+      "a single positive finite number"
+    }
+    stop(sprintf("%s must be %s.", name, expected), call. = FALSE)
+  }
+  as.numeric(x)
+}
+
+validate_required_person_fraction <- function(required_person_fraction) {
+  if (!is.numeric(required_person_fraction) ||
+      length(required_person_fraction) != 1L ||
+      !is.finite(required_person_fraction) ||
+      required_person_fraction <= 0 ||
+      required_person_fraction > 1) {
+    stop("required_person_fraction must be a single number in (0, 1].", call. = FALSE)
+  }
+  as.numeric(required_person_fraction)
+}
+
+#' Draw one composition from a Dirichlet distribution.
+#'
+#' @param concentration_parameters Positive Dirichlet concentration parameters.
+#'
+#' @return Numeric vector on the simplex with the same length as
+#'   `concentration_parameters`.
+sample_dirichlet <- function(concentration_parameters) {
+  concentration_parameters <- validate_positive_numeric(
+    concentration_parameters,
+    "concentration_parameters",
+    allow_vector = TRUE
+  )
+  draws <- stats::rgamma(length(concentration_parameters), shape = concentration_parameters, rate = 1)
+  total <- sum(draws)
+  if (!is.finite(total) || total <= 0) {
+    stop("Dirichlet sampling produced an invalid total gamma draw.", call. = FALSE)
+  }
+  draws / total
+}
+
+#' Simulate person-level counts from a Dirichlet-multinomial hierarchy.
+#'
+#' @param p Population mean proportion vector.
+#' @param n_people Number of people to sample.
+#' @param n_per_person Number of cells sampled for each person.
+#' @param concentration Positive Dirichlet concentration parameter.
+#'
+#' @return List containing an `n_people` by `K` count matrix and a matching
+#'   matrix of person-specific latent true proportions.
+simulate_counts_dirichlet_multinomial <- function(p, n_people, n_per_person, concentration) {
+  validate_proportions(p)
+  n_people      <- validate_positive_integer(n_people, "n_people")
+  n_per_person  <- validate_positive_integer(n_per_person, "n_per_person")
+  concentration <- validate_positive_numeric(concentration, "concentration")
+
+  K <- length(p)
+  person_true_proportions <- t(vapply(
+    seq_len(n_people),
+    function(person_id) sample_dirichlet(concentration * p),
+    FUN.VALUE = numeric(K)
+  ))
+  counts <- t(vapply(
+    seq_len(n_people),
+    function(person_id) simulate_counts_multinomial(person_true_proportions[person_id, ], n_per_person),
+    FUN.VALUE = integer(K)
+  ))
+  colnames(counts) <- paste0("cell_type_", seq_len(K))
+  colnames(person_true_proportions) <- colnames(counts)
+
+  list(
+    counts = counts,
+    person_true_proportions = person_true_proportions
+  )
+}
 
 # Placeholder: to be implemented when correlation support is added.
 # simulate_counts_logistic_normal_multinomial <- function(p, n, Sigma, ...) {
@@ -146,22 +233,40 @@ simulate_counts_multinomial <- function(p, n) {
 #' Dispatcher: simulate counts from the requested model.
 #'
 #' @param p      True proportion vector.
-#' @param n      Total sample size.
-#' @param model  Sampling model; currently only "multinomial" is implemented.
+#' @param n      Total sample size for the multinomial model.
+#' @param model  Sampling model.
+#' @param n_people Number of people for the Dirichlet-multinomial model.
+#' @param n_per_person Number of cells sampled for each person in the
+#'   Dirichlet-multinomial model.
+#' @param concentration Dirichlet concentration parameter for the
+#'   Dirichlet-multinomial model.
 #' @param ...    Additional arguments forwarded to the concrete simulator (reserved for future overdispersed /
 #'               correlated models).
 #'
-#' @return Integer vector of length K summing to n.
-simulate_counts <- function(p, n,
+#' @return For `"multinomial"`, an integer vector of length K summing to n.
+#'   For `"dirichlet_multinomial"`, a list with person-level count and latent
+#'   proportion matrices.
+simulate_counts <- function(p, n = NULL,
                             model = c("multinomial",
                                       "dirichlet_multinomial",
                                       "logistic_normal_multinomial"),
+                            n_people = NULL,
+                            n_per_person = NULL,
+                            concentration = NULL,
                             ...) {
   model <- match.arg(model)
   switch(model,
-    multinomial = simulate_counts_multinomial(p, n),
-    dirichlet_multinomial = stop(
-      "model = 'dirichlet_multinomial' is not yet implemented."
+    multinomial = {
+      if (is.null(n)) {
+        stop("n must be provided for model = 'multinomial'.", call. = FALSE)
+      }
+      simulate_counts_multinomial(p, n)
+    },
+    dirichlet_multinomial = simulate_counts_dirichlet_multinomial(
+      p = p,
+      n_people = n_people,
+      n_per_person = n_per_person,
+      concentration = concentration
     ),
     logistic_normal_multinomial = stop(
       "model = 'logistic_normal_multinomial' is not yet implemented."
@@ -224,22 +329,31 @@ compute_errors <- function(phat, p, metrics = c("AE", "ARE"), n = NULL) {
 # Coordinate Simulation --------------------------------------------------------------------------------------------
 
 
-#' Run B simulation replicates and store max errors + argmax indices.
+#' Run B simulation replicates and store error results.
 #'
 #' Efficiency strategy: simulate B times once, store only the per-replicate max error values and argmax indices.
 #' Threshold evaluation is done post-hoc by `evaluate_thresholds()` without re-simulating.
 #'
 #' @param p          True proportion vector (length K).
-#' @param n          Total sample size.
+#' @param n          Total sample size for the multinomial model.
 #' @param B          Number of replicates.
 #' @param metrics    Error metrics to compute; any subset of
 #'   `c("AE", "ARE", "TSE", "LAE")`.
 #' @param model      Sampling model passed to `simulate_counts()`.
+#' @param n_people   Number of people for the Dirichlet-multinomial model.
+#' @param n_per_person Number of cells sampled for each person in the
+#'   Dirichlet-multinomial model.
+#' @param concentration Positive Dirichlet concentration parameter.
+#' @param scenario_id Optional scenario identifier included in person-level
+#'   Dirichlet-multinomial output.
 #' @param tie_method Tie-breaking rule passed to `max_error_summary()`.
 #' @param seed       Optional integer seed for reproducibility.
 #' @param ...        Additional arguments forwarded to `simulate_counts()`.
 #'
-#' @return List with elements:
+#' @return For `"multinomial"`, the existing list with max-error matrices and
+#'   arrays. For `"dirichlet_multinomial"`, a list with `person_results`, a
+#'   tidy data.frame containing one row per replicate, person, cell type, and
+#'   metric, plus `inputs`.
 #'   \describe{
 #'     \item{max_errors}{B x M numeric matrix of max error values.}
 #'     \item{argmax}{B x M integer matrix of argmax indices.}
@@ -247,12 +361,100 @@ compute_errors <- function(phat, p, metrics = c("AE", "ARE"), n = NULL) {
 #'     \item{phat}{B x K numeric matrix of observed proportions.}
 #'     \item{inputs}{Copy of all input arguments (including seed used).}
 #'   }
-run_replicates <- function(p, n, B,
+run_replicates_dirichlet_multinomial <- function(p, B, metrics,
+                                                 n_people, n_per_person,
+                                                 concentration, scenario_id = NA_character_,
+                                                 seed = NULL) {
+  B             <- validate_positive_integer(B, "B")
+  n_people      <- validate_positive_integer(n_people, "n_people")
+  n_per_person  <- validate_positive_integer(n_per_person, "n_per_person")
+  concentration <- validate_positive_numeric(concentration, "concentration")
+  validate_proportions(p)
+
+  K <- length(p)
+  rows <- vector("list", B * n_people * K * length(metrics))
+  row_index <- 0L
+  for (replicate_id in seq_len(B)) {
+    draw <- simulate_counts(
+      p = p,
+      model = "dirichlet_multinomial",
+      n_people = n_people,
+      n_per_person = n_per_person,
+      concentration = concentration
+    )
+    for (person_id in seq_len(n_people)) {
+      counts <- draw$counts[person_id, ]
+      person_p <- draw$person_true_proportions[person_id, ]
+      observed_p <- counts_to_proportions(counts, n_per_person)
+      errors <- compute_errors(observed_p, person_p, metrics = metrics, n = n_per_person)
+      for (metric in metrics) {
+        for (cell_type in seq_len(K)) {
+          row_index <- row_index + 1L
+          rows[[row_index]] <- data.frame(
+            scenario_id = scenario_id,
+            n_people = n_people,
+            concentration = concentration,
+            replicate = replicate_id,
+            person_id = person_id,
+            cell_type = cell_type,
+            metric = metric,
+            count = as.integer(counts[[cell_type]]),
+            observed_proportion = observed_p[[cell_type]],
+            person_true_proportion = person_p[[cell_type]],
+            population_mean_proportion = p[[cell_type]],
+            error = errors[[metric]][[cell_type]],
+            stringsAsFactors = FALSE
+          )
+        }
+      }
+    }
+  }
+
+  list(
+    person_results = do.call(rbind, rows),
+    inputs = list(
+      p = p,
+      B = B,
+      metrics = metrics,
+      model = "dirichlet_multinomial",
+      n_people = n_people,
+      n_per_person = n_per_person,
+      concentration = concentration,
+      scenario_id = scenario_id,
+      seed = seed
+    )
+  )
+}
+
+run_replicates <- function(p, n = NULL, B,
                            metrics = c("AE", "ARE"),
                            model = "multinomial",
                            tie_method = "random",
-                           seed = NULL, ...) {
+                           seed = NULL,
+                           n_people = NULL,
+                           n_per_person = NULL,
+                           concentration = NULL,
+                           scenario_id = NA_character_,
+                           ...) {
   if (!is.null(seed)) set.seed(seed)
+  if (identical(model, "dirichlet_multinomial")) {
+    return(run_replicates_dirichlet_multinomial(
+      p = p,
+      B = B,
+      metrics = metrics,
+      n_people = n_people,
+      n_per_person = n_per_person,
+      concentration = concentration,
+      scenario_id = scenario_id,
+      seed = seed
+    ))
+  }
+  if (!identical(model, "multinomial")) {
+    stop(sprintf("model = '%s' is not supported by run_replicates().", model), call. = FALSE)
+  }
+  if (is.null(n)) {
+    stop("n must be provided for model = 'multinomial'.", call. = FALSE)
+  }
   K <- length(p)
   stopifnot(K >= 1L, B >= 1L)
 
@@ -300,7 +502,11 @@ run_replicates <- function(p, n, B,
 #' is successful only if *both* conditions hold simultaneously.
 #'
 #' @param alpha          Positive scalar; Beta shape parameter used to generate the true proportions.
-#' @param n              Total sample size (positive integer).
+#' @param n              Total sample size (positive integer) for the
+#'   multinomial model. For the Dirichlet-multinomial model, use
+#'   `n_per_person`.
+#' @param n_per_person   Number of sampled cells for each person in the
+#'   Dirichlet-multinomial model.
 #' @param config         Named list; must contain at minimum:
 #'   \describe{
 #'     \item{K}{Number of cell types.}
@@ -308,7 +514,14 @@ run_replicates <- function(p, n, B,
 #'     \item{taus}{Named list with one scalar threshold per metric (e.g.
 #'       `list(AE = 0.02, ARE = 0.5)`); scalar thresholds only.}
 #'     \item{metrics}{Character vector of metric names to simulate.}
-#'     \item{model}{Sampling model (currently `"multinomial"`).}
+#'     \item{model}{Sampling model (`"multinomial"` or
+#'       `"dirichlet_multinomial"`).}
+#'     \item{n_people}{Required for `"dirichlet_multinomial"`; number of
+#'       people per replicate.}
+#'     \item{concentration}{Required for `"dirichlet_multinomial"`; positive
+#'       Dirichlet concentration parameter.}
+#'     \item{required_person_fraction}{Optional fraction in `(0, 1]` of
+#'       people who must pass all active thresholds; defaults to `1`.}
 #'     \item{tie_method}{Tie-breaking rule for max-error argmax.}
 #'     \item{proportion_method}{Proportion-generation method.}
 #'     \item{seed}{Optional integer RNG seed.}
@@ -321,12 +534,85 @@ run_replicates <- function(p, n, B,
 #'     \item{success_rate}{Numeric; fraction of successful replicates.}
 #'     \item{rep_out}{Raw output of `run_replicates()`.}
 #'   }
-simulate_success_at_n <- function(alpha, n, config) {
+simulate_success_at_n <- function(alpha, n = NULL, config, n_per_person = NULL) {
   p <- generate_proportions(
     alpha  = alpha,
     K      = config$K,
     method = config$proportion_method
   )
+  if (identical(config$model, "dirichlet_multinomial")) {
+    if (is.null(n_per_person)) {
+      n_per_person <- n
+    }
+    if (is.null(n_per_person)) {
+      stop("n_per_person must be provided for model = 'dirichlet_multinomial'.", call. = FALSE)
+    }
+    required_person_fraction <- if (is.null(config$required_person_fraction)) {
+      1
+    } else {
+      config$required_person_fraction
+    }
+    required_person_fraction <- validate_required_person_fraction(required_person_fraction)
+    rep_out <- run_replicates(
+      p = p,
+      B = config$B,
+      metrics = config$metrics,
+      model = config$model,
+      seed = config$seed,
+      n_people = config$n_people,
+      n_per_person = n_per_person,
+      concentration = config$concentration
+    )
+    person_results <- rep_out$person_results
+    person_pass <- rep(TRUE, config$B * config$n_people)
+    person_keys <- expand.grid(
+      replicate = seq_len(config$B),
+      person_id = seq_len(config$n_people),
+      KEEP.OUT.ATTRS = FALSE,
+      stringsAsFactors = FALSE
+    )
+
+    for (metric in config$metrics) {
+      threshold <- config$taus[[metric]]
+      if (is.null(threshold)) {
+        warning(sprintf(
+          "simulate_success_at_n: metric '%s' has no threshold in config$taus; it will not contribute to the success criterion.",
+          metric
+        ))
+      } else if (length(threshold) == 1L) {
+        metric_results <- person_results[person_results$metric == metric, , drop = FALSE]
+        metric_pass <- vapply(seq_len(nrow(person_keys)), function(i) {
+          rows <- metric_results[
+            metric_results$replicate == person_keys$replicate[[i]] &
+              metric_results$person_id == person_keys$person_id[[i]],
+            ,
+            drop = FALSE
+          ]
+          nrow(rows) > 0L && all(rows$error <= threshold)
+        }, logical(1L))
+        person_pass <- person_pass & metric_pass
+      }
+    }
+
+    person_keys$pass <- person_pass
+    people_passing <- tapply(
+      person_keys$pass,
+      person_keys$replicate,
+      sum
+    )
+    people_required <- ceiling(required_person_fraction * config$n_people)
+    success <- people_passing >= people_required
+
+    return(list(
+      success = as.logical(success),
+      success_count = sum(success),
+      success_rate = mean(success),
+      person_success = person_keys,
+      required_people_passing = people_required,
+      rep_out = rep_out
+    ))
+  }
+
   rep_out <- run_replicates(
     p          = p,
     n          = n,
@@ -361,26 +647,4 @@ simulate_success_at_n <- function(alpha, n, config) {
     success_rate  = mean(success),
     rep_out       = rep_out
   )
-}
-
-
-simulate_success_curve_for_alpha <- function(alpha, n_values, config, seed_offset = 0L) {
-  rows <- vector("list", length(n_values))
-  for (i in seq_along(n_values)) {
-    config_i <- config
-    if (!is.null(config$seed)) {
-      config_i$seed <- as.integer(config$seed + seed_offset + i - 1L)
-    }
-    
-    sim_i <- simulate_success_at_n(alpha = alpha, n = n_values[[i]], config = config_i)
-    rows[[i]] <- data.frame(
-      alpha = alpha,
-      n = as.integer(n_values[[i]]),
-      success_rate = sim_i$success_rate,
-      success_count = sim_i$success_count,
-      B = as.integer(config$B),
-      stringsAsFactors = FALSE
-    )
-  }
-  do.call(rbind, rows)
 }
