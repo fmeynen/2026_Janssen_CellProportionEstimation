@@ -159,17 +159,6 @@ validate_positive_numeric <- function(x, name, allow_vector = FALSE) {
   as.numeric(x)
 }
 
-validate_required_person_fraction <- function(required_person_fraction) {
-  if (!is.numeric(required_person_fraction) ||
-      length(required_person_fraction) != 1L ||
-      !is.finite(required_person_fraction) ||
-      required_person_fraction <= 0 ||
-      required_person_fraction > 1) {
-    stop("required_person_fraction must be a single number in (0, 1].", call. = FALSE)
-  }
-  as.numeric(required_person_fraction)
-}
-
 #' Draw one composition from a Dirichlet distribution.
 #'
 #' @param concentration_parameters Positive Dirichlet concentration parameters.
@@ -687,122 +676,85 @@ run_replicates <- function(p, n = NULL, B,
 
 #' Simulate replicates at one sample size and derive per-replicate success.
 #'
-#' Success is defined as: for every metric that has a corresponding threshold in `taus`, the max error across all K cell
-#' types must be at or below that threshold.  When both AE and ARE are requested and both have thresholds, a replicate
-#' is successful only if *both* conditions hold simultaneously.
+#' Both sampling models share a single success rule, `replicate_success()`: for each metric in `config$taus`, the
+#' error is averaged over persons per (replicate, cell type), and the largest of these per-cell-type means must be
+#' `<= tau`; a replicate succeeds jointly only if it succeeds for every metric in `config$taus`.
 #'
-#' @param alpha          Positive scalar; Beta shape parameter used to generate the true proportions.
-#' @param n              Total sample size (positive integer) for the
-#'   multinomial model. For the Dirichlet-multinomial model, use
-#'   `n_per_person`.
-#' @param n_per_person   Number of sampled cells for each person in the
-#'   Dirichlet-multinomial model.
-#' @param config         Named list; must contain at minimum:
+#' The multinomial model has no person structure, so its per-cell-type errors (one draw per replicate) are treated
+#' as a single synthetic person (`person_id = 1`) before being handed to `replicate_success()` — averaging over one
+#' person is a no-op, so this reduces to "every cell-type error <= tau" for that model, matching its previous
+#' behaviour. The Dirichlet-multinomial model's `person_results` (one row per replicate, person, cell type, metric)
+#' is passed to `replicate_success()` directly.
+#'
+#' Metrics in `config$metrics` that have no entry in `config$taus` are simulated but do not contribute to the
+#' success criterion: `simulate_success_at_n()` warns about them once per call, and — because such metrics are
+#' simply absent from `config$taus` — `replicate_success()` never sees them and so never emits its own "metric not
+#' in person_results" warning for the same metric. That second warning path only fires for a metric that has a tau
+#' but was not simulated at all, a genuinely different (misconfiguration) case.
+#'
+#' @param alpha  Positive scalar; Beta shape parameter used to generate the true proportions.
+#' @param n      Positive integer sample size. For `config$model == "multinomial"`, the total sample size (cells)
+#'   per replicate. For `config$model == "dirichlet_multinomial"`, the number of cells sampled per person
+#'   (`n_per_person`); the number of people per replicate is fixed by `config$n_people`, not by `n`.
+#' @param config Named list; must contain at minimum:
 #'   \describe{
 #'     \item{K}{Number of cell types.}
 #'     \item{B}{Number of replicates.}
-#'     \item{taus}{Named list with one scalar threshold per metric (e.g.
-#'       `list(AE = 0.02, ARE = 0.5)`); scalar thresholds only.}
+#'     \item{taus}{Named list with one scalar threshold per metric (e.g. `list(AE = 0.02, ARE = 0.5)`); scalar
+#'       thresholds only. Metrics simulated but absent here are skipped (see Details).}
 #'     \item{metrics}{Character vector of metric names to simulate.}
-#'     \item{model}{Sampling model (`"multinomial"` or
-#'       `"dirichlet_multinomial"`).}
-#'     \item{n_people}{Required for `"dirichlet_multinomial"`; number of
-#'       people per replicate.}
-#'     \item{concentration}{Required for `"dirichlet_multinomial"`; positive
-#'       Dirichlet concentration parameter.}
-#'     \item{required_person_fraction}{Optional fraction in `(0, 1]` of
-#'       people who must pass all active thresholds; defaults to `1`.}
-#'     \item{tie_method}{Tie-breaking rule for max-error argmax.}
+#'     \item{model}{Sampling model (`"multinomial"` or `"dirichlet_multinomial"`).}
+#'     \item{n_people}{Required for `"dirichlet_multinomial"`; number of people per replicate.}
+#'     \item{concentration}{Required for `"dirichlet_multinomial"`; positive Dirichlet concentration parameter.}
+#'     \item{tie_method}{Tie-breaking rule for max-error argmax (multinomial only; unused by
+#'       `replicate_success()`, but still forwarded to `run_replicates()`).}
 #'     \item{proportion_method}{Proportion-generation method.}
-#'     \item{seed}{Optional integer RNG seed.}
 #'   }
+#' @param seed   Optional integer RNG seed forwarded to `run_replicates()`; defaults to `config$seed`. Because
+#'   `run_replicates()` derives per-replicate RNG streams from `seed` alone (see `replicate_streams()`), calling
+#'   this function with the same `seed` at different `n` draws from the same per-replicate streams (common random
+#'   numbers across `n`), which is what the sample-size solver relies on when comparing pilots.
 #'
 #' @return List with elements:
 #'   \describe{
-#'     \item{success}{Logical vector of length B.}
+#'     \item{success}{Logical vector of length B, in replicate order.}
 #'     \item{success_count}{Integer; number of successful replicates.}
 #'     \item{success_rate}{Numeric; fraction of successful replicates.}
 #'     \item{rep_out}{Raw output of `run_replicates()`.}
 #'   }
-# TODO: the Dirichlet-multinomial branch still uses the old per-person rule (a person passes if all cell-type errors are
-#   within tau; a replicate succeeds if `required_person_fraction` of people pass). Update it to the current definition
-#   used by `extract_success_rate()`: mean error over persons per cell type, max over cell types, <= tau for every metric.
-simulate_success_at_n <- function(alpha, n = NULL, config, n_per_person = NULL) {
+simulate_success_at_n <- function(alpha, n = NULL, config, seed = config$seed) {
   p <- generate_proportions(
     alpha  = alpha,
     K      = config$K,
     method = config$proportion_method
   )
+
+  missing_tau_msg <- paste0(
+    "simulate_success_at_n: metric '%s' has no threshold in config$taus; ",
+    "it will not contribute to the success criterion."
+  )
+  for (m in setdiff(config$metrics, names(config$taus))) {
+    warning(sprintf(missing_tau_msg, m), call. = FALSE)
+  }
+
   if (identical(config$model, "dirichlet_multinomial")) {
-    if (is.null(n_per_person)) {
-      n_per_person <- n
-    }
-    if (is.null(n_per_person)) {
-      stop("n_per_person must be provided for model = 'dirichlet_multinomial'.", call. = FALSE)
-    }
-    required_person_fraction <- if (is.null(config$required_person_fraction)) {
-      1
-    } else {
-      config$required_person_fraction
-    }
-    required_person_fraction <- validate_required_person_fraction(required_person_fraction)
     rep_out <- run_replicates(
-      p = p,
-      B = config$B,
-      metrics = config$metrics,
-      model = config$model,
-      seed = config$seed,
-      n_people = config$n_people,
-      n_per_person = n_per_person,
+      p             = p,
+      B             = config$B,
+      metrics       = config$metrics,
+      model         = config$model,
+      seed          = seed,
+      n_people      = config$n_people,
+      n_per_person  = n,
       concentration = config$concentration
     )
-    person_results <- rep_out$person_results
-    person_pass <- rep(TRUE, config$B * config$n_people)
-    person_keys <- expand.grid(
-      replicate = seq_len(config$B),
-      person_id = seq_len(config$n_people),
-      KEEP.OUT.ATTRS = FALSE,
-      stringsAsFactors = FALSE
-    )
-
-    for (metric in config$metrics) {
-      threshold <- config$taus[[metric]]
-      if (is.null(threshold)) {
-        warning(sprintf(
-          "simulate_success_at_n: metric '%s' has no threshold in config$taus; it will not contribute to the success criterion.",
-          metric
-        ))
-      } else if (length(threshold) == 1L) {
-        metric_results <- person_results[person_results$metric == metric, , drop = FALSE]
-        metric_pass <- vapply(seq_len(nrow(person_keys)), function(i) {
-          rows <- metric_results[
-            metric_results$replicate == person_keys$replicate[[i]] &
-              metric_results$person_id == person_keys$person_id[[i]],
-            ,
-            drop = FALSE
-          ]
-          nrow(rows) > 0L && all(rows$error <= threshold)
-        }, logical(1L))
-        person_pass <- person_pass & metric_pass
-      }
-    }
-
-    person_keys$pass <- person_pass
-    people_passing <- tapply(
-      person_keys$pass,
-      person_keys$replicate,
-      sum
-    )
-    people_required <- ceiling(required_person_fraction * config$n_people)
-    success <- people_passing >= people_required
+    pass <- replicate_success(rep_out$person_results, config$taus)
 
     return(list(
-      success = as.logical(success),
-      success_count = sum(success),
-      success_rate = mean(success),
-      person_success = person_keys,
-      required_people_passing = people_required,
-      rep_out = rep_out
+      success       = as.logical(pass$pass),
+      success_count = sum(pass$pass),
+      success_rate  = mean(pass$pass),
+      rep_out       = rep_out
     ))
   }
 
@@ -813,31 +765,38 @@ simulate_success_at_n <- function(alpha, n = NULL, config, n_per_person = NULL) 
     metrics    = config$metrics,
     model      = config$model,
     tie_method = config$tie_method,
-    seed       = config$seed
+    seed       = seed
   )
-  max_errors <- rep_out$max_errors
-  metrics    <- config$metrics
-  taus       <- config$taus
 
-  # Build a B-length logical success vector: replicate passes iff every metric
-  # with a threshold has its max error <= that threshold.
-  success <- rep(TRUE, config$B)
-  for (m in metrics) {
-    if (is.null(taus[[m]])) {
-      warning(sprintf(
-        "simulate_success_at_n: metric '%s' has no threshold in config$taus; it will not contribute to the success
-        criterion.",
-        m
-      ))
-    } else if (length(taus[[m]]) == 1L) {
-      success <- success & (max_errors[, m] <= taus[[m]])
-    }
-  }
+  # rep_out$errors is a B x K x M array (dimnames list(NULL, 1..K, metrics)); flatten it into a long data.frame
+  # with a single synthetic person_id = 1 per replicate so replicate_success() (which expects one row per
+  # replicate/person/cell_type/metric) can be reused for the multinomial model too. expand.grid()'s default
+  # variation order (first argument fastest) matches the array's column-major storage order (dim 1 fastest, then
+  # dim 2, then dim 3), so `error = as.vector(rep_out$errors)` lines up exactly with `grid`.
+  errors_dim <- dim(rep_out$errors)
+  metrics    <- dimnames(rep_out$errors)[[3L]]
+  grid <- expand.grid(
+    replicate = seq_len(errors_dim[[1L]]),
+    cell_type = seq_len(errors_dim[[2L]]),
+    metric    = metrics,
+    KEEP.OUT.ATTRS   = FALSE,
+    stringsAsFactors = FALSE
+  )
+  person_results <- data.frame(
+    replicate = grid$replicate,
+    person_id = 1L,
+    cell_type = grid$cell_type,
+    metric    = grid$metric,
+    error     = as.vector(rep_out$errors),
+    stringsAsFactors = FALSE
+  )
+
+  pass <- replicate_success(person_results, config$taus)
 
   list(
-    success       = success,
-    success_count = sum(success),
-    success_rate  = mean(success),
+    success       = as.logical(pass$pass),
+    success_count = sum(pass$pass),
+    success_rate  = mean(pass$pass),
     rep_out       = rep_out
   )
 }
