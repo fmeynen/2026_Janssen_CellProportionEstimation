@@ -3,14 +3,17 @@
 
 # simulation_samplesize.R
 #
-# Iterative sample-size estimation for each alpha.
+# Sample-size estimation for each alpha, using the iterative solver on log(n) (`estimate_sample_size()` in
+# scripts/simulation_layers/calculation.R), orchestrated across the alpha grid by
+# `run_sample_size_experiment()` (scripts/simulation_layers/orchestration.R).
 #
 # Workflow:
-#   1. For each alpha, run 3 pilot sample sizes (95%, 100%, 105% of n_init).
-#   2. Fit glm(success ~ n, family = binomial) to observed success counts.
-#   3. Invert the curve to estimate the sample size hitting the target success rate.
-#   4. Repeat until convergence or max iterations; always round up.
-#   5. Propagate the final estimate as the next alpha's n_init.
+#   1. For each alpha, in order, run the solver: fit pilots around a centre, invert the logistic success curve on
+#      log(n), and iterate until the relative change in n is within tolerance or max_iterations is reached.
+#   2. Warm start: the first alpha starts from config$n_init; every later alpha starts from the previous alpha's
+#      final sample size.
+#   3. Each alpha's result is cached to its own file (per-alpha cache, keyed on a config that includes that
+#      alpha's warm-start n_init), so re-running only recomputes alphas whose inputs actually changed.
 # ---------------------------------------------------------------------------
 
 #+ echo=TRUE, results='hide'
@@ -23,22 +26,29 @@ library(ggplot2)
 # Setup config file -----------------------------------------------------------------------------------------------
 
 simulation_sample_size_defaults <- function(n_init = 200000) {
-  tau_AE <- 0.002
-  tau_ARE <- 0.05
   list(
     alpha                = seq(from = 2, to = 5, by = 0.05),
     K                    = 10L,
-    n                    = n_init,
+    n_init               = n_init,
     B                    = 500L,
-    taus                 = list(AE = tau_AE, ARE = tau_ARE),
+    taus                 = list(AE = 0.002, ARE = 0.05),
     metrics              = c("AE", "ARE"),
     model                = "multinomial",
+    # To switch to the Dirichlet-multinomial model instead:
+    #   model         = "dirichlet_multinomial",
+    #   n_people      = <people per replicate>,
+    #   concentration = <Dirichlet concentration parameter>,
+    # `n_init` (and, at solve time, `n`) then means cells sampled per person, not total cells.
+    n_people             = NULL,
+    concentration        = NULL,
     tie_method           = "random",
     proportion_method    = "beta",
     seed                 = 260925L,
     success_rate_target  = 0.95,
-    sample_size_tolerance = 100L,
-    max_iterations       = 20L
+    rel_tol              = 0.01,
+    max_iterations       = 20L,
+    f0                   = 2,
+    f_floor              = 1.1
   )
 }
 
@@ -47,58 +57,18 @@ config <- simulation_sample_size_defaults()
 
 # Calculate sample sizes ------------------------------------------------------------------------------------------
 
-
-run_simulation_samplesize <- function(config = simulation_sample_size_defaults(),
-                                      cache = TRUE,
-                                      force_recompute = FALSE,
-                                      cache_dir = here::here("results", "simresults")) {
-  result_file <- simulation_result_path(
-    config = config,
-    dir    = cache_dir,
-    name   = "sample_size"
-  )
-  if (cache && !force_recompute && file.exists(result_file)) {
-    return(readRDS(result_file))
-  }
-
-  alphas        <- config$alpha
-  n_samples     <- numeric(length(alphas))
-  diag_list     <- vector("list", length(alphas))
-  n_init        <- config$n
-
-  for (a in seq_along(alphas)) {
-    iter_result        <- iterate_sample_size_for_alpha(alphas[a], n_init, config)
-    n_samples[a]       <- iter_result$final_n
-    diag_list[[a]]     <- iter_result$diagnostics
-    n_init             <- iter_result$final_n
-  }
-
-  result <- list(
-    sample_size  = as.integer(n_samples),
-    diagnostics  = do.call(rbind, diag_list)
-  )
-
-  if (cache) {
-    saveRDS(result, result_file)
-  }
-  result
-}
-
-
-
-res <- run_simulation_samplesize()
+res <- run_sample_size_experiment(config)
 
 #+ echo=TRUE, results='markup'
-res$sample_size
-ggplot(data.frame(alpha = config$alpha, sample_size = res$sample_size),
-       aes(x = alpha, y = sample_size)) +
+print(res$sample_size)
+
+ggplot(res$sample_size, aes(x = alpha, y = sample_size)) +
   geom_line() +
   labs(x = "Alpha", y = "Sample Size (log scale)") +
   theme_minimal() +
   scale_y_log10()
 
-ggplot(data.frame(alpha = config$alpha, sample_size = res$sample_size),
-       aes(x = alpha, y = sample_size)) +
+ggplot(res$sample_size, aes(x = alpha, y = sample_size)) +
   geom_line() +
   labs(x = "Alpha", y = "Sample Size") +
   theme_minimal()

@@ -41,6 +41,82 @@ simulation_result_path <- function(config, dir, name) {
   file.path(dir, paste0(name, "_", hash_config(config), ".rds"))
 }
 
+#' Run the sample-size solver over a grid of alphas with warm start and per-alpha caching.
+#'
+#' For each alpha in `config$alpha`, in the given order, runs `estimate_sample_size()` to find the smallest sample
+#' size reaching `config$success_rate_target`. Alphas are chained: the first alpha's solver starts from
+#' `config$n_init`, and every later alpha's solver starts from the previous alpha's `final_n` (warm start). Each
+#' alpha's result is cached in its own file under `cache_dir`, keyed by a config that includes that alpha's
+#' `n_init` — so changing an earlier alpha (and hence a later alpha's warm-start value) invalidates that later
+#' alpha's cache entry, while leaving unaffected entries untouched.
+#'
+#' @param config          List with `alpha` (numeric vector, the grid) and `n_init` (the first alpha's starting
+#'   centre), plus every field required by `estimate_sample_size()` (`success_rate_target`, `rel_tol`,
+#'   `max_iterations`, `B`, `f0`, `f_floor`, `seed`) and by `simulate` (by default `simulate_success_at_n()`, which
+#'   also needs `K`, `taus`, `metrics`, `model`, `tie_method`, `proportion_method`, and — for
+#'   `model == "dirichlet_multinomial"` — `n_people` and `concentration`).
+#' @param cache           Logical; read/write per-alpha `.rds` cache files under `cache_dir`.
+#' @param force_recompute Logical; ignore any existing cache file and recompute (still writes the new result when
+#'   `cache` is `TRUE`).
+#' @param cache_dir       Directory holding the per-alpha cache files.
+#' @param simulate        Function `(alpha, n, config, seed)` forwarded to `estimate_sample_size()`. Defaults to
+#'   `simulate_success_at_n()`.
+#'
+#' @return List with elements:
+#'   \describe{
+#'     \item{sample_size}{Data.frame with one row per alpha and columns `alpha`, `sample_size` (integer,
+#'       `final_n`), `stopping_reason`, `iterations_used`.}
+#'     \item{diagnostics}{Data.frame; `rbind()` of every alpha's `estimate_sample_size()` diagnostics, in grid
+#'       order.}
+#'   }
+run_sample_size_experiment <- function(
+  config,
+  cache = TRUE,
+  force_recompute = FALSE,
+  cache_dir = here::here("results", "simresults"),
+  simulate = simulate_success_at_n
+) {
+  alphas <- validate_positive_numeric(config$alpha, "config$alpha", allow_vector = TRUE)
+  n_init <- validate_positive_numeric(config$n_init, "config$n_init")
+
+  n_alpha          <- length(alphas)
+  sample_size_rows <- vector("list", n_alpha)
+  diag_list        <- vector("list", n_alpha)
+
+  for (i in seq_len(n_alpha)) {
+    alpha_i        <- alphas[[i]]
+    alpha_config   <- config
+    alpha_config$alpha  <- alpha_i
+    alpha_config$n_init <- n_init
+    result_file    <- simulation_result_path(alpha_config, cache_dir, "sample_size")
+
+    if (cache && !force_recompute && file.exists(result_file)) {
+      alpha_result <- readRDS(result_file)
+    } else {
+      alpha_result <- estimate_sample_size(alpha_i, n_init, alpha_config, simulate = simulate)
+      if (cache) {
+        saveRDS(alpha_result, result_file)
+      }
+    }
+
+    sample_size_rows[[i]] <- data.frame(
+      alpha           = alpha_i,
+      sample_size     = as.integer(alpha_result$final_n),
+      stopping_reason = alpha_result$stopping_reason,
+      iterations_used = alpha_result$iterations_used,
+      stringsAsFactors = FALSE
+    )
+    diag_list[[i]] <- alpha_result$diagnostics
+    n_init         <- alpha_result$final_n
+  }
+
+  list(
+    sample_size = do.call(rbind, sample_size_rows),
+    diagnostics = do.call(rbind, diag_list)
+  )
+}
+
+
 # Run individual experiments --------------------------------------------------------------------------------------
 run_dirichlet_multinomial_experiment <- function(
   alpha,
