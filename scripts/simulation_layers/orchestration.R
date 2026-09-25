@@ -324,6 +324,155 @@ run_dirichlet_multinomial_experiment <- function(
 }
 
 
+#' Run the Dirichlet-multinomial "errorchoice" experiment over an (alpha, n_people, n_per_person) grid.
+#'
+#' AE and ARE (or any other metrics in `metrics`) are studied separately: for each scenario (one combination of
+#' `alpha`, `n_people`, `n_per_person`) and each metric, every replicate is reduced immediately to one scalar
+#' "stat" -- the max, over cell types, of the mean-over-persons error -- via `replicate_max_mean_error()`. The
+#' full `person_results` produced by `run_replicates()` for a scenario are discarded as soon as they have been
+#' reduced to `stat` values, so memory use does not grow with the size of the (alpha, n_people, n_per_person)
+#' grid.
+#'
+#' Common random numbers: the seed depends only on the (alpha, n_people) pair. Pairs are enumerated in the order
+#' of `expand.grid(n_people = n_people, alpha = alpha)`; the j-th pair uses `seed + j - 1L` (or `NULL` when `seed`
+#' is `NULL`), identical for every `n_per_person` value, so scenarios that share an (alpha, n_people) pair but
+#' differ only in `n_per_person` draw from the same underlying Dirichlet-multinomial streams.
+#'
+#' @param alpha  Numeric vector; positive Beta shape parameter(s) used by `proportion_method` to generate each
+#'   population mean proportion vector (one vector per alpha, computed once and reused across the grid).
+#' @param K      Positive integer; number of cell types.
+#' @param B      Positive integer; number of replicates per scenario.
+#' @param metrics Character vector; error metrics to compute (forwarded to `run_replicates()` and
+#'   `replicate_max_mean_error()`), studied independently of one another.
+#' @param proportion_method Proportion-generation method forwarded to `generate_proportions()` (default
+#'   `"beta"`).
+#' @param n_people Positive integer vector; number(s) of people per replicate.
+#' @param n_per_person Positive integer vector; number(s) of cells sampled per person.
+#' @param concentration Positive numeric scalar; Dirichlet concentration parameter (shared by every scenario).
+#' @param seed   Optional single integer seed; see Details for how it is combined with the (alpha, n_people) pair
+#'   index. `NULL` means every scenario draws an unseeded (non-reproducible) stream.
+#'
+#' @return List with elements:
+#'   \describe{
+#'     \item{inputs}{All input arguments (`alpha`, `K`, `B`, `metrics`, `proportion_method`, `n_people`,
+#'       `n_per_person`, `concentration`, `seed`).}
+#'     \item{p_table}{Data.frame with one row per alpha and columns `alpha`, `index_1`, ..., `index_K`.}
+#'     \item{stats}{Data.frame with one row per (alpha, n_people, n_per_person, metric, replicate) and columns
+#'       `alpha`, `n_people`, `concentration`, `n_per_person`, `metric`, `replicate`, `stat`.}
+#'   }
+run_dm_errorchoice_experiment <- function(
+  alpha,
+  K,
+  B,
+  metrics,
+  proportion_method = "beta",
+  n_people,
+  n_per_person,
+  concentration,
+  seed
+) {
+  alpha <- validate_positive_numeric(alpha, "alpha", allow_vector = TRUE)
+  K <- validate_positive_integer(K, "K")
+  B <- validate_positive_integer(B, "B")
+  n_people <- validate_positive_integer(n_people, "n_people", allow_vector = TRUE)
+  n_per_person <- validate_positive_integer(n_per_person, "n_per_person", allow_vector = TRUE)
+  concentration <- validate_positive_numeric(concentration, "concentration")
+
+  # p is a deterministic function of alpha (and K, proportion_method), so it is computed once per alpha and
+  # reused across every n_people / n_per_person scenario for that alpha.
+  p_list <- lapply(alpha, function(a) {
+    generate_proportions(alpha = a, K = K, method = proportion_method)
+  })
+
+  pairs <- expand.grid(
+    n_people = n_people,
+    alpha = alpha,
+    KEEP.OUT.ATTRS = FALSE,
+    stringsAsFactors = FALSE
+  )
+  n_pairs <- nrow(pairs)
+  n_values <- length(n_per_person)
+  total_scenarios <- n_pairs * n_values
+
+  stats_list <- vector("list", total_scenarios)
+  scenario_counter <- 0L
+
+  for (j in seq_len(n_pairs)) {
+    alpha_j <- pairs$alpha[[j]]
+    n_people_j <- pairs$n_people[[j]]
+    p_j <- p_list[[match(alpha_j, alpha)]]
+    seed_j <- if (is.null(seed)) NULL else seed + j - 1L
+
+    for (n in n_per_person) {
+      scenario_counter <- scenario_counter + 1L
+
+      rep_out <- run_replicates(
+        p = p_j,
+        B = B,
+        metrics = metrics,
+        model = "dirichlet_multinomial",
+        seed = seed_j,
+        n_people = n_people_j,
+        n_per_person = n,
+        concentration = concentration
+      )
+
+      metric_rows <- vector("list", length(metrics))
+      for (mi in seq_along(metrics)) {
+        m <- metrics[[mi]]
+        stat_df <- replicate_max_mean_error(rep_out$person_results, m)
+        metric_rows[[mi]] <- data.frame(
+          alpha = alpha_j,
+          n_people = n_people_j,
+          concentration = concentration,
+          n_per_person = n,
+          metric = m,
+          replicate = stat_df$replicate,
+          stat = stat_df$stat,
+          stringsAsFactors = FALSE
+        )
+      }
+      stats_list[[scenario_counter]] <- do.call(rbind, metric_rows)
+      rm(rep_out) # drop person_results before moving to the next scenario (memory).
+
+      message(sprintf(
+        "[%d/%d] alpha=%s n_people=%d n_per_person=%d",
+        scenario_counter,
+        total_scenarios,
+        format(alpha_j, trim = TRUE),
+        n_people_j,
+        n
+      ))
+    }
+  }
+
+  p_table_list <- lapply(seq_along(alpha), function(i) {
+    data.frame(
+      alpha = alpha[[i]],
+      as.list(stats::setNames(as.numeric(p_list[[i]]), paste0("index_", seq_len(K)))),
+      stringsAsFactors = FALSE,
+      check.names = FALSE
+    )
+  })
+
+  list(
+    inputs = list(
+      alpha = alpha,
+      K = K,
+      B = B,
+      metrics = metrics,
+      proportion_method = proportion_method,
+      n_people = n_people,
+      n_per_person = n_per_person,
+      concentration = concentration,
+      seed = seed
+    ),
+    p_table = do.call(rbind, p_table_list),
+    stats = do.call(rbind, stats_list)
+  )
+}
+
+
 # Original Simulation ---------------------------------------------------------------------------------------------
 
 #' Run the original full simulation experiment end-to-end.
