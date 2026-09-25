@@ -1,6 +1,5 @@
 #+ echo=TRUE, results='hide'
 
-
 # simulation_samplesize.R
 #
 # Sample-size estimation for each alpha, using the iterative solver on log(n) (`estimate_sample_size()` in
@@ -17,7 +16,10 @@
 # ---------------------------------------------------------------------------
 
 #+ echo=TRUE, results='hide'
-simulation_helper_files <- list.files(here::here("scripts", "simulation_layers"))
+simulation_helper_files <- list.files(here::here(
+  "scripts",
+  "simulation_layers"
+))
 lapply(simulation_helper_files, function(f) {
   source(here::here("scripts", "simulation_layers", f))
 })
@@ -27,27 +29,27 @@ library(ggplot2)
 
 simulation_sample_size_defaults <- function(n_init = 200000) {
   list(
-    alpha                = seq(from = 2, to = 5, by = 0.5),
-    K                    = 10L,
-    n_init               = n_init,
-    B                    = 500L,
-    taus                 = list(AE = 0.002, ARE = 0.05),
-    metrics              = c("AE", "ARE"),
-    n_people             = 2,
-    concentration        = 50,
-    model                = "dirichlet_multinomial",
+    alpha = 2,
+    K = 10L,
+    n_init = n_init,
+    B = 500L,
+    taus = list(AE = 0.02, ARE = 2),
+    metrics = c("AE", "ARE"),
+    n_people = 2,
+    concentration = 50,
+    model = "dirichlet_multinomial",
     # `n_init` (and, at solve time, `n`) then means cells sampled per person, not total cells.
-    n_people             = NULL,
-    concentration        = NULL,
-    tie_method           = "random",
-    proportion_method    = "beta",
-    seed                 = 260925L,
-    success_rate_target  = 0.95,
-    rel_tol              = 0.01,
-    max_iterations       = 20L,
-    f0                   = 2,
-    f_floor              = 1.1,
-    n_max                = 1e9
+    n_people = NULL,
+    concentration = NULL,
+    tie_method = "random",
+    proportion_method = "beta",
+    seed = 260925L,
+    success_rate_target = 0.95,
+    rel_tol = 0.01,
+    max_iterations = 20L,
+    f0 = 2,
+    f_floor = 1.1,
+    n_max = 1e9
   )
 }
 
