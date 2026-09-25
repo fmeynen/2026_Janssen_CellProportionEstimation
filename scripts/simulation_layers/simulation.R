@@ -159,17 +159,6 @@ validate_positive_numeric <- function(x, name, allow_vector = FALSE) {
   as.numeric(x)
 }
 
-validate_required_person_fraction <- function(required_person_fraction) {
-  if (!is.numeric(required_person_fraction) ||
-      length(required_person_fraction) != 1L ||
-      !is.finite(required_person_fraction) ||
-      required_person_fraction <= 0 ||
-      required_person_fraction > 1) {
-    stop("required_person_fraction must be a single number in (0, 1].", call. = FALSE)
-  }
-  as.numeric(required_person_fraction)
-}
-
 #' Draw one composition from a Dirichlet distribution.
 #'
 #' @param concentration_parameters Positive Dirichlet concentration parameters.
@@ -326,6 +315,172 @@ compute_errors <- function(phat, p, metrics = c("AE", "ARE"), n = NULL) {
   result
 }
 
+# Replicate RNG helpers ---------------------------------------------------------------------------------------
+
+#' Number of cores to use for replicate-level parallelism.
+#'
+#' Returns `1L` on any non-unix platform (in particular Windows), so replicates always run serially
+#' there. On unix platforms, returns `parallel::detectCores() - 1L`, falling back to `1L` when that
+#' value is not available (`NA`) or less than `1`. There is no configuration override: this is a
+#' deliberate, fixed policy.
+#'
+#' @return A single positive integer.
+replicate_cores <- function() {
+  if (!identical(.Platform$OS.type, "unix")) {
+    return(1L)
+  }
+  cores <- parallel::detectCores() - 1L
+  if (is.na(cores) || cores < 1L) {
+    return(1L)
+  }
+  as.integer(cores)
+}
+
+#' Build B independent, reproducible L'Ecuyer-CMRG RNG streams.
+#'
+#' Each returned element is a `.Random.seed` vector that, once installed as the active RNG state
+#' (under `RNGkind("L'Ecuyer-CMRG")`), starts an independent substream. Stream `b` is derived by
+#' chaining `parallel::nextRNGStream()` `b - 1` times from the stream seeded directly from `seed`, so
+#' it depends only on `(seed, b)` — never on `B` or on how many cores later consume the streams. As a
+#' result, the first `k` streams of a `B`-replicate call are identical to the first `k` streams of any
+#' larger `B' > k` call made with the same `seed`.
+#'
+#' The caller's RNG kind is always restored on exit, and `.Random.seed` is restored to whatever it
+#' was immediately *after* resolving `seed` (see below), so calling this function with an explicit
+#' `seed` has no visible effect on the global RNG state.
+#'
+#' @param seed Optional single integer seed. If `NULL`, a seed is drawn from the caller's current RNG
+#'   state via `sample.int()` *before* that state is saved, so — exactly like any other call that
+#'   consumes randomness — the caller's RNG advances and is not rewound afterwards; consecutive
+#'   unseeded calls therefore draw different seeds and produce different streams.
+#' @param B    Number of streams to build (positive integer).
+#'
+#' @return A list of length `B` of `.Random.seed` vectors, one per replicate.
+replicate_streams <- function(seed, B) {
+  B <- validate_positive_integer(B, "B")
+
+  # Draw a NULL seed *before* saving/restoring the caller's RNG state below, so an unseeded call
+  # advances the caller's RNG exactly like any other call to sample.int() would -- otherwise the
+  # restore would silently undo the draw and every unseeded call would return identical streams.
+  if (is.null(seed)) {
+    seed <- sample.int(.Machine$integer.max, 1L)
+  }
+
+  old_kind <- RNGkind()
+  has_old_seed <- exists(".Random.seed", envir = globalenv(), inherits = FALSE)
+  old_seed <- if (has_old_seed) get(".Random.seed", envir = globalenv()) else NULL
+  on.exit({
+    # RNGkind() must be restored *before* re-assigning .Random.seed: assigning .Random.seed while
+    # the active kind still differs re-derives/mutates the seed instead of reinstating it exactly.
+    suppressWarnings(RNGkind(old_kind[[1L]], old_kind[[2L]], old_kind[[3L]]))
+    if (has_old_seed) {
+      assign(".Random.seed", old_seed, envir = globalenv())
+    } else if (exists(".Random.seed", envir = globalenv(), inherits = FALSE)) {
+      rm(".Random.seed", envir = globalenv())
+    }
+  }, add = TRUE)
+
+  RNGkind("L'Ecuyer-CMRG")
+  set.seed(seed)
+  stream  <- .Random.seed
+  streams <- vector("list", B)
+  for (b in seq_len(B)) {
+    streams[[b]] <- stream
+    stream       <- parallel::nextRNGStream(stream)
+  }
+  streams
+}
+
+#' Check `parallel::mclapply()` results for failed or missing replicates.
+#'
+#' `parallel::mclapply()` does not stop the parent process on a worker error: a replicate whose call
+#' raised an error is returned as a `"try-error"` object instead of its real result, and a replicate
+#' whose worker was killed (e.g. by the OS, out of memory) is returned as `NULL`. Left unchecked,
+#' either failure mode would silently propagate a bogus value into downstream aggregation. This
+#' helper scans `results` and stops with the first failure's message if any replicate failed; it does
+#' not itself depend on `parallel::mclapply()` or on unix, so it can be unit-tested on any platform.
+#'
+#' @param results List of per-replicate results, as returned by `parallel::mclapply()` (or any list
+#'   that may contain `NULL` or `"try-error"` elements).
+#'
+#' @return `results`, invisibly and unchanged, if every replicate succeeded.
+check_replicate_results <- function(results) {
+  for (i in seq_along(results)) {
+    res <- results[[i]]
+    if (is.null(res)) {
+      stop(
+        sprintf("replicate_apply: worker for replicate %d was killed or returned no result.", i),
+        call. = FALSE
+      )
+    }
+    if (inherits(res, "try-error")) {
+      stop(
+        sprintf(
+          "replicate_apply: replicate %d failed: %s",
+          i,
+          conditionMessage(attr(res, "condition"))
+        ),
+        call. = FALSE
+      )
+    }
+  }
+  invisible(results)
+}
+
+#' Apply FUN once per replicate, each with its own independent RNG stream.
+#'
+#' Before calling `FUN(b)`, installs `streams[[b]]` as the active `.Random.seed` (under
+#' `RNGkind("L'Ecuyer-CMRG")`), so replicate `b` always draws from the same stream no matter which
+#' worker processes it or in what order. On unix platforms with more than one core available
+#' (`replicate_cores()`), replicates are distributed across cores with `parallel::mclapply()`
+#' (`mc.set.seed = FALSE`, since seeding is handled explicitly per replicate); on Windows, or when
+#' only one core is available, replicates run serially via `lapply()`. Either way, results are
+#' returned in replicate order and do not depend on the number of cores used.
+#'
+#' `parallel::mclapply()` does not raise an error in the parent process when a worker fails or is
+#' killed; `check_replicate_results()` is used to detect and re-raise those failures so they are not
+#' silently swallowed.
+#'
+#' The caller's RNG kind and `.Random.seed` are saved and restored on exit.
+#'
+#' @param streams List of `.Random.seed` vectors (as produced by `replicate_streams()`), one per
+#'   replicate.
+#' @param FUN     Function of one argument, the replicate index `b` (the position of the
+#'   corresponding stream in `streams`), returning that replicate's result.
+#'
+#' @return A list of length `length(streams)`, in replicate order, of `FUN`'s return values.
+replicate_apply <- function(streams, FUN) {
+  old_kind <- RNGkind()
+  has_old_seed <- exists(".Random.seed", envir = globalenv(), inherits = FALSE)
+  old_seed <- if (has_old_seed) get(".Random.seed", envir = globalenv()) else NULL
+  on.exit({
+    # RNGkind() must be restored *before* re-assigning .Random.seed: assigning .Random.seed while
+    # the active kind still differs re-derives/mutates the seed instead of reinstating it exactly.
+    suppressWarnings(RNGkind(old_kind[[1L]], old_kind[[2L]], old_kind[[3L]]))
+    if (has_old_seed) {
+      assign(".Random.seed", old_seed, envir = globalenv())
+    } else if (exists(".Random.seed", envir = globalenv(), inherits = FALSE)) {
+      rm(".Random.seed", envir = globalenv())
+    }
+  }, add = TRUE)
+
+  RNGkind("L'Ecuyer-CMRG")
+
+  run_one <- function(b) {
+    assign(".Random.seed", streams[[b]], envir = globalenv())
+    FUN(b)
+  }
+
+  cores <- replicate_cores()
+  if (cores > 1L) {
+    results <- parallel::mclapply(seq_along(streams), run_one, mc.cores = cores, mc.set.seed = FALSE)
+    check_replicate_results(results)
+  } else {
+    lapply(seq_along(streams), run_one)
+  }
+}
+
+
 # Coordinate Simulation --------------------------------------------------------------------------------------------
 
 
@@ -372,9 +527,22 @@ run_replicates_dirichlet_multinomial <- function(p, B, metrics,
   validate_proportions(p)
 
   K <- length(p)
-  rows <- vector("list", B * n_people * K * length(metrics))
-  row_index <- 0L
-  for (replicate_id in seq_len(B)) {
+  M <- length(metrics)
+
+  # Row order within one replicate's data.frame: person_id (outer), metric, cell_type (inner) --
+  # matching expand.grid()'s fastest-first variation of its first argument.
+  grid <- expand.grid(
+    cell_type = seq_len(K),
+    metric    = metrics,
+    person_id = seq_len(n_people),
+    KEEP.OUT.ATTRS   = FALSE,
+    stringsAsFactors = FALSE
+  )
+  idx_person_cell <- cbind(grid$person_id, grid$cell_type)
+  metric_index    <- match(grid$metric, metrics)
+
+  streams <- replicate_streams(seed, B)
+  replicate_frames <- replicate_apply(streams, function(b) {
     draw <- simulate_counts(
       p = p,
       model = "dirichlet_multinomial",
@@ -382,36 +550,35 @@ run_replicates_dirichlet_multinomial <- function(p, B, metrics,
       n_per_person = n_per_person,
       concentration = concentration
     )
-    for (person_id in seq_len(n_people)) {
-      counts <- draw$counts[person_id, ]
-      person_p <- draw$person_true_proportions[person_id, ]
-      observed_p <- counts_to_proportions(counts, n_per_person)
-      errors <- compute_errors(observed_p, person_p, metrics = metrics, n = n_per_person)
-      for (metric in metrics) {
-        for (cell_type in seq_len(K)) {
-          row_index <- row_index + 1L
-          rows[[row_index]] <- data.frame(
-            scenario_id = scenario_id,
-            n_people = n_people,
-            concentration = concentration,
-            replicate = replicate_id,
-            person_id = person_id,
-            cell_type = cell_type,
-            metric = metric,
-            count = as.integer(counts[[cell_type]]),
-            observed_proportion = observed_p[[cell_type]],
-            person_true_proportion = person_p[[cell_type]],
-            population_mean_proportion = p[[cell_type]],
-            error = errors[[metric]][[cell_type]],
-            stringsAsFactors = FALSE
-          )
-        }
-      }
+    counts      <- draw$counts
+    person_p    <- draw$person_true_proportions
+    observed_p  <- counts_to_proportions(counts, n_per_person)
+    errors_list <- compute_errors(observed_p, person_p, metrics = metrics, n = n_per_person)
+
+    errors_3d <- array(NA_real_, dim = c(n_people, K, M))
+    for (mi in seq_len(M)) {
+      errors_3d[, , mi] <- errors_list[[metrics[[mi]]]]
     }
-  }
+
+    data.frame(
+      scenario_id                = scenario_id,
+      n_people                   = n_people,
+      concentration              = concentration,
+      replicate                  = b,
+      person_id                  = grid$person_id,
+      cell_type                  = grid$cell_type,
+      metric                     = grid$metric,
+      count                      = as.integer(counts[idx_person_cell]),
+      observed_proportion        = observed_p[idx_person_cell],
+      person_true_proportion     = person_p[idx_person_cell],
+      population_mean_proportion = p[grid$cell_type],
+      error                      = errors_3d[cbind(grid$person_id, grid$cell_type, metric_index)],
+      stringsAsFactors = FALSE
+    )
+  })
 
   list(
-    person_results = do.call(rbind, rows),
+    person_results = do.call(rbind, replicate_frames),
     inputs = list(
       p = p,
       B = B,
@@ -436,7 +603,6 @@ run_replicates <- function(p, n = NULL, B,
                            concentration = NULL,
                            scenario_id = NA_character_,
                            ...) {
-  if (!is.null(seed)) set.seed(seed)
   if (identical(model, "dirichlet_multinomial")) {
     return(run_replicates_dirichlet_multinomial(
       p = p,
@@ -466,17 +632,30 @@ run_replicates <- function(p, n = NULL, B,
                       dimnames = list(NULL, seq_len(K), metrics))
   phat       <- matrix(NA_real_, nrow = B, ncol = K)
 
-  for (b in seq_len(B)) {
+  streams <- replicate_streams(seed, B)
+  replicate_results <- replicate_apply(streams, function(b) {
     y_b      <- simulate_counts(p, n, model = model, ...)
     phat_b   <- counts_to_proportions(y_b, n)
-    phat[b, ] <- phat_b
     errors_b <- compute_errors(phat_b, p, metrics = metrics, n = n)
 
+    max_error_b <- stats::setNames(rep(NA_real_,    length(metrics)), metrics)
+    argmax_b    <- stats::setNames(rep(NA_integer_, length(metrics)), metrics)
     for (m in metrics) {
       s <- max_error_summary(errors_b[[m]], tie_method = tie_method)
-      max_errors[b, m] <- s$max_error_value
-      argmax[b, m]     <- s$argmax_index
-      errors[b, , m]   <- errors_b[[m]]
+      max_error_b[[m]] <- s$max_error_value
+      argmax_b[[m]]    <- s$argmax_index
+    }
+
+    list(phat = phat_b, errors = errors_b, max_error = max_error_b, argmax = argmax_b)
+  })
+
+  for (b in seq_len(B)) {
+    res <- replicate_results[[b]]
+    phat[b, ] <- res$phat
+    for (m in metrics) {
+      max_errors[b, m] <- res$max_error[[m]]
+      argmax[b, m]     <- res$argmax[[m]]
+      errors[b, , m]   <- res$errors[[m]]
     }
   }
 
@@ -497,122 +676,85 @@ run_replicates <- function(p, n = NULL, B,
 
 #' Simulate replicates at one sample size and derive per-replicate success.
 #'
-#' Success is defined as: for every metric that has a corresponding threshold in `taus`, the max error across all K cell
-#' types must be at or below that threshold.  When both AE and ARE are requested and both have thresholds, a replicate
-#' is successful only if *both* conditions hold simultaneously.
+#' Both sampling models share a single success rule, `replicate_success()`: for each metric in `config$taus`, the
+#' error is averaged over persons per (replicate, cell type), and the largest of these per-cell-type means must be
+#' `<= tau`; a replicate succeeds jointly only if it succeeds for every metric in `config$taus`.
 #'
-#' @param alpha          Positive scalar; Beta shape parameter used to generate the true proportions.
-#' @param n              Total sample size (positive integer) for the
-#'   multinomial model. For the Dirichlet-multinomial model, use
-#'   `n_per_person`.
-#' @param n_per_person   Number of sampled cells for each person in the
-#'   Dirichlet-multinomial model.
-#' @param config         Named list; must contain at minimum:
+#' The multinomial model has no person structure, so its per-cell-type errors (one draw per replicate) are treated
+#' as a single synthetic person (`person_id = 1`) before being handed to `replicate_success()` — averaging over one
+#' person is a no-op, so this reduces to "every cell-type error <= tau" for that model, matching its previous
+#' behaviour. The Dirichlet-multinomial model's `person_results` (one row per replicate, person, cell type, metric)
+#' is passed to `replicate_success()` directly.
+#'
+#' Metrics in `config$metrics` that have no entry in `config$taus` are simulated but do not contribute to the
+#' success criterion: `simulate_success_at_n()` warns about them once per call, and — because such metrics are
+#' simply absent from `config$taus` — `replicate_success()` never sees them and so never emits its own "metric not
+#' in person_results" warning for the same metric. That second warning path only fires for a metric that has a tau
+#' but was not simulated at all, a genuinely different (misconfiguration) case.
+#'
+#' @param alpha  Positive scalar; Beta shape parameter used to generate the true proportions.
+#' @param n      Positive integer sample size. For `config$model == "multinomial"`, the total sample size (cells)
+#'   per replicate. For `config$model == "dirichlet_multinomial"`, the number of cells sampled per person
+#'   (`n_per_person`); the number of people per replicate is fixed by `config$n_people`, not by `n`.
+#' @param config Named list; must contain at minimum:
 #'   \describe{
 #'     \item{K}{Number of cell types.}
 #'     \item{B}{Number of replicates.}
-#'     \item{taus}{Named list with one scalar threshold per metric (e.g.
-#'       `list(AE = 0.02, ARE = 0.5)`); scalar thresholds only.}
+#'     \item{taus}{Named list with one scalar threshold per metric (e.g. `list(AE = 0.02, ARE = 0.5)`); scalar
+#'       thresholds only. Metrics simulated but absent here are skipped (see Details).}
 #'     \item{metrics}{Character vector of metric names to simulate.}
-#'     \item{model}{Sampling model (`"multinomial"` or
-#'       `"dirichlet_multinomial"`).}
-#'     \item{n_people}{Required for `"dirichlet_multinomial"`; number of
-#'       people per replicate.}
-#'     \item{concentration}{Required for `"dirichlet_multinomial"`; positive
-#'       Dirichlet concentration parameter.}
-#'     \item{required_person_fraction}{Optional fraction in `(0, 1]` of
-#'       people who must pass all active thresholds; defaults to `1`.}
-#'     \item{tie_method}{Tie-breaking rule for max-error argmax.}
+#'     \item{model}{Sampling model (`"multinomial"` or `"dirichlet_multinomial"`).}
+#'     \item{n_people}{Required for `"dirichlet_multinomial"`; number of people per replicate.}
+#'     \item{concentration}{Required for `"dirichlet_multinomial"`; positive Dirichlet concentration parameter.}
+#'     \item{tie_method}{Tie-breaking rule for max-error argmax (multinomial only; unused by
+#'       `replicate_success()`, but still forwarded to `run_replicates()`).}
 #'     \item{proportion_method}{Proportion-generation method.}
-#'     \item{seed}{Optional integer RNG seed.}
 #'   }
+#' @param seed   Optional integer RNG seed forwarded to `run_replicates()`; defaults to `config$seed`. Because
+#'   `run_replicates()` derives per-replicate RNG streams from `seed` alone (see `replicate_streams()`), calling
+#'   this function with the same `seed` at different `n` draws from the same per-replicate streams (common random
+#'   numbers across `n`), which is what the sample-size solver relies on when comparing pilots.
 #'
 #' @return List with elements:
 #'   \describe{
-#'     \item{success}{Logical vector of length B.}
+#'     \item{success}{Logical vector of length B, in replicate order.}
 #'     \item{success_count}{Integer; number of successful replicates.}
 #'     \item{success_rate}{Numeric; fraction of successful replicates.}
 #'     \item{rep_out}{Raw output of `run_replicates()`.}
 #'   }
-# TODO: the Dirichlet-multinomial branch still uses the old per-person rule (a person passes if all cell-type errors are
-#   within tau; a replicate succeeds if `required_person_fraction` of people pass). Update it to the current definition
-#   used by `extract_success_rate()`: mean error over persons per cell type, max over cell types, <= tau for every metric.
-simulate_success_at_n <- function(alpha, n = NULL, config, n_per_person = NULL) {
+simulate_success_at_n <- function(alpha, n = NULL, config, seed = config$seed) {
   p <- generate_proportions(
     alpha  = alpha,
     K      = config$K,
     method = config$proportion_method
   )
+
+  missing_tau_msg <- paste0(
+    "simulate_success_at_n: metric '%s' has no threshold in config$taus; ",
+    "it will not contribute to the success criterion."
+  )
+  for (m in setdiff(config$metrics, names(config$taus))) {
+    warning(sprintf(missing_tau_msg, m), call. = FALSE)
+  }
+
   if (identical(config$model, "dirichlet_multinomial")) {
-    if (is.null(n_per_person)) {
-      n_per_person <- n
-    }
-    if (is.null(n_per_person)) {
-      stop("n_per_person must be provided for model = 'dirichlet_multinomial'.", call. = FALSE)
-    }
-    required_person_fraction <- if (is.null(config$required_person_fraction)) {
-      1
-    } else {
-      config$required_person_fraction
-    }
-    required_person_fraction <- validate_required_person_fraction(required_person_fraction)
     rep_out <- run_replicates(
-      p = p,
-      B = config$B,
-      metrics = config$metrics,
-      model = config$model,
-      seed = config$seed,
-      n_people = config$n_people,
-      n_per_person = n_per_person,
+      p             = p,
+      B             = config$B,
+      metrics       = config$metrics,
+      model         = config$model,
+      seed          = seed,
+      n_people      = config$n_people,
+      n_per_person  = n,
       concentration = config$concentration
     )
-    person_results <- rep_out$person_results
-    person_pass <- rep(TRUE, config$B * config$n_people)
-    person_keys <- expand.grid(
-      replicate = seq_len(config$B),
-      person_id = seq_len(config$n_people),
-      KEEP.OUT.ATTRS = FALSE,
-      stringsAsFactors = FALSE
-    )
-
-    for (metric in config$metrics) {
-      threshold <- config$taus[[metric]]
-      if (is.null(threshold)) {
-        warning(sprintf(
-          "simulate_success_at_n: metric '%s' has no threshold in config$taus; it will not contribute to the success criterion.",
-          metric
-        ))
-      } else if (length(threshold) == 1L) {
-        metric_results <- person_results[person_results$metric == metric, , drop = FALSE]
-        metric_pass <- vapply(seq_len(nrow(person_keys)), function(i) {
-          rows <- metric_results[
-            metric_results$replicate == person_keys$replicate[[i]] &
-              metric_results$person_id == person_keys$person_id[[i]],
-            ,
-            drop = FALSE
-          ]
-          nrow(rows) > 0L && all(rows$error <= threshold)
-        }, logical(1L))
-        person_pass <- person_pass & metric_pass
-      }
-    }
-
-    person_keys$pass <- person_pass
-    people_passing <- tapply(
-      person_keys$pass,
-      person_keys$replicate,
-      sum
-    )
-    people_required <- ceiling(required_person_fraction * config$n_people)
-    success <- people_passing >= people_required
+    pass <- replicate_success(rep_out$person_results, config$taus)
 
     return(list(
-      success = as.logical(success),
-      success_count = sum(success),
-      success_rate = mean(success),
-      person_success = person_keys,
-      required_people_passing = people_required,
-      rep_out = rep_out
+      success       = as.logical(pass$pass),
+      success_count = sum(pass$pass),
+      success_rate  = mean(pass$pass),
+      rep_out       = rep_out
     ))
   }
 
@@ -623,31 +765,38 @@ simulate_success_at_n <- function(alpha, n = NULL, config, n_per_person = NULL) 
     metrics    = config$metrics,
     model      = config$model,
     tie_method = config$tie_method,
-    seed       = config$seed
+    seed       = seed
   )
-  max_errors <- rep_out$max_errors
-  metrics    <- config$metrics
-  taus       <- config$taus
 
-  # Build a B-length logical success vector: replicate passes iff every metric
-  # with a threshold has its max error <= that threshold.
-  success <- rep(TRUE, config$B)
-  for (m in metrics) {
-    if (is.null(taus[[m]])) {
-      warning(sprintf(
-        "simulate_success_at_n: metric '%s' has no threshold in config$taus; it will not contribute to the success
-        criterion.",
-        m
-      ))
-    } else if (length(taus[[m]]) == 1L) {
-      success <- success & (max_errors[, m] <= taus[[m]])
-    }
-  }
+  # rep_out$errors is a B x K x M array (dimnames list(NULL, 1..K, metrics)); flatten it into a long data.frame
+  # with a single synthetic person_id = 1 per replicate so replicate_success() (which expects one row per
+  # replicate/person/cell_type/metric) can be reused for the multinomial model too. expand.grid()'s default
+  # variation order (first argument fastest) matches the array's column-major storage order (dim 1 fastest, then
+  # dim 2, then dim 3), so `error = as.vector(rep_out$errors)` lines up exactly with `grid`.
+  errors_dim <- dim(rep_out$errors)
+  metrics    <- dimnames(rep_out$errors)[[3L]]
+  grid <- expand.grid(
+    replicate = seq_len(errors_dim[[1L]]),
+    cell_type = seq_len(errors_dim[[2L]]),
+    metric    = metrics,
+    KEEP.OUT.ATTRS   = FALSE,
+    stringsAsFactors = FALSE
+  )
+  person_results <- data.frame(
+    replicate = grid$replicate,
+    person_id = 1L,
+    cell_type = grid$cell_type,
+    metric    = grid$metric,
+    error     = as.vector(rep_out$errors),
+    stringsAsFactors = FALSE
+  )
+
+  pass <- replicate_success(person_results, config$taus)
 
   list(
-    success       = success,
-    success_count = sum(success),
-    success_rate  = mean(success),
+    success       = as.logical(pass$pass),
+    success_count = sum(pass$pass),
+    success_rate  = mean(pass$pass),
     rep_out       = rep_out
   )
 }

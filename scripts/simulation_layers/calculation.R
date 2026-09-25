@@ -1,6 +1,8 @@
 # Calculation Layer -----------------------------------------------------------------------------------------------
-# Calculation layer: error metrics, threshold evaluation, and sample size estimation helpers
-
+# Calculation layer: error metrics and threshold evaluation.
+# NOTE: the old iterative-GLM sample-size helpers (fit_success_glm,
+# solve_sample_size_from_glm, iterate_sample_size_for_alpha) have been moved to
+# scripts/deprecated/deprecated.R and are being replaced by a new solver below.
 
 # Compute Success Rate --------------------------------------------------------------------------------------------
 
@@ -45,12 +47,18 @@ evaluate_thresholds <- function(max_errors, taus, errors = NULL) {
 
   rows <- vector("list", length(metrics))
   for (i in seq_along(metrics)) {
-    m     <- metrics[[i]]
+    m <- metrics[[i]]
     tau_m <- taus_list[[m]]
-    rates <- vapply(tau_m, function(tau) mean(max_errors[, m] <= tau, na.rm = TRUE), numeric(1L))
+    rates <- vapply(
+      tau_m,
+      function(tau) mean(max_errors[, m] <= tau, na.rm = TRUE),
+      numeric(1L)
+    )
     if (has_error_array) {
-      errors_m <- errors[, , m, drop = TRUE]
-      if (is.null(dim(errors_m))) errors_m <- matrix(errors_m, nrow = nrow(max_errors))
+      errors_m <- errors[,, m, drop = TRUE]
+      if (is.null(dim(errors_m))) {
+        errors_m <- matrix(errors_m, nrow = nrow(max_errors))
+      }
       mean_n_above <- vapply(
         tau_m,
         function(tau) mean(rowSums(errors_m > tau), na.rm = TRUE),
@@ -59,207 +67,350 @@ evaluate_thresholds <- function(max_errors, taus, errors = NULL) {
     } else {
       mean_n_above <- rep(NA_real_, length(tau_m))
     }
-    rows[[i]] <- data.frame(metric = m, tau = tau_m, success_rate = rates,
-                            mean_n_above = mean_n_above,
-                            stringsAsFactors = FALSE)
+    rows[[i]] <- data.frame(
+      metric = m,
+      tau = tau_m,
+      success_rate = rates,
+      mean_n_above = mean_n_above,
+      stringsAsFactors = FALSE
+    )
   }
   do.call(rbind, rows)
 }
 
 
-# Sample-Size Estimation Helpers--------------------------------------------------------------------------------------
+# Sample-Size Estimation --------------------------------------------------------------------------------------
 
-#' Fit a binomial GLM to relate sample size to observed success counts.
+#' Pilot sample sizes around a centre on a multiplicative grid.
 #'
-#' @param n_values      Integer or numeric vector of pilot sample sizes.
-#' @param success_count Integer vector of success counts (same length as `n_values`).
-#' @param B             Integer; number of replicates per pilot size (the
-#'   denominator for the proportion).
+#' @param n Numeric scalar, the current centre (> 0).
+#' @param f Numeric scalar spread factor (> 1). Pilots are placed at `n / f`, `n` and `n * f`.
+#' @param n_max Upper cap on any pilot size (<= `.Machine$integer.max`).
 #'
-#' @return A fitted `glm` object (`family = binomial`).
-fit_success_glm <- function(n_values, success_count, B) {
-  stopifnot(length(n_values) == length(success_count))
-  stopifnot(is.numeric(B), length(B) == 1L, B >= 1L)
-  failure_count <- B - success_count
-  stats::glm(
-    cbind(success_count, failure_count) ~ n_values,
-    family = stats::binomial(link = "logit")
+#' @return Sorted, unique integer vector of pilot sizes, each rounded up and within `[1, n_max]`.
+sample_size_pilots <- function(n, f, n_max = 1e9) {
+  stopifnot(
+    is.numeric(n),
+    length(n) == 1L,
+    is.finite(n),
+    n > 0,
+    is.numeric(f),
+    length(f) == 1L,
+    is.finite(f),
+    f > 1,
+    is.numeric(n_max),
+    length(n_max) == 1L,
+    n_max >= 1,
+    n_max <= .Machine$integer.max
+  )
+  sort(unique(as.integer(pmin(n_max, pmax(1, ceiling(c(n / f, n, n * f)))))))
+}
+
+
+#' Fit a logistic success curve on log(n).
+#'
+#' Fits `glm(cbind(s, B - s) ~ log(n), family = binomial)`. Only the two warnings caused by (quasi-)separation are
+#' suppressed: "fitted probabilities numerically 0 or 1" and "algorithm did not converge". The latter is routine when
+#' a single pilot is interior and all others are saturated (e.g. just after an `expand_down`); the resulting steep fit
+#' still gives a usable next centre. Any other warning is propagated.
+#'
+#' @param n_values      Numeric vector of pilot sample sizes (>= 1).
+#' @param success_count Integer vector of successful replicates per pilot (0..B).
+#' @param B             Number of replicates per pilot.
+#'
+#' @return The fitted `glm` object.
+fit_success_curve <- function(n_values, success_count, B) {
+  stopifnot(
+    is.numeric(n_values),
+    length(n_values) >= 1L,
+    all(n_values >= 1),
+    is.numeric(success_count),
+    length(success_count) == length(n_values),
+    is.numeric(B),
+    length(B) == 1L,
+    B >= 1,
+    all(success_count >= 0),
+    all(success_count <= B)
+  )
+  dat <- data.frame(n = n_values, s = success_count, fails = B - success_count)
+  withCallingHandlers(
+    stats::glm(
+      cbind(s, fails) ~ log(n),
+      family = stats::binomial(),
+      data = dat
+    ),
+    warning = function(w) {
+      msg <- conditionMessage(w)
+      if (
+        grepl("fitted probabilities numerically 0 or 1", msg, fixed = TRUE) ||
+          grepl("algorithm did not converge", msg, fixed = TRUE)
+      ) {
+        invokeRestart("muffleWarning")
+      }
+    }
   )
 }
 
 
-#' Solve for the sample size that achieves a target success rate from a GLM.
+#' Invert a fitted success curve at a target success rate.
 #'
-#' Inverts the logistic link: n = (logit(target) - intercept) / slope.
-#' Always rounds the result **up** to the nearest integer.
+#' Solves `qlogis(target) = intercept + slope * log(n)` for n. A non-finite or negative slope is set to 0: the curve
+#' is then flat, so the target is `n_max` when the fitted success rate is below the target and 1 otherwise. A solved n
+#' that is not finite or exceeds `n_max` falls back to `n_max`.
 #'
-#' @param glm_fit            A fitted `glm` with a single predictor `n_values`.
-#' @param target_success_rate Numeric scalar in (0, 1).
+#' @param fit    A `glm` from `fit_success_curve()`; its intercept must be finite.
+#' @param target Target success rate in (0, 1).
+#' @param n_max  Fallback and upper cap for the solved n (<= `.Machine$integer.max`).
 #'
-#' @return List with:
-#'   \describe{
-#'     \item{n_raw}{Numeric raw (unrounded) estimate.}
-#'     \item{n_rounded}{Integer; `ceiling(n_raw)`.}
-#'   }
-solve_sample_size_from_glm <- function(glm_fit, target_success_rate) {
+#' @return Integer n, rounded up, within `[1, n_max]`.
+solve_success_curve <- function(fit, target, n_max = 1e9) {
   stopifnot(
-    is.numeric(target_success_rate),
-    length(target_success_rate) == 1L,
-    target_success_rate > 0,
-    target_success_rate < 1
+    is.numeric(target), length(target) == 1L, target > 0, target < 1,
+    is.numeric(n_max), length(n_max) == 1L, n_max >= 1, n_max <= .Machine$integer.max
   )
-  coefs     <- stats::coef(glm_fit)
-  intercept <- coefs[[1L]]
-  slope     <- coefs[[2L]]
-  if (!is.finite(slope) || slope == 0) {
-    stop("GLM slope is zero or non-finite; cannot solve for sample size.",
-         call. = FALSE)
+  coefs <- stats::coef(fit)
+  intercept <- unname(coefs[[1L]])
+  slope <- unname(coefs[[2L]])
+  if (!is.finite(intercept)) {
+    stop("Cannot invert the success curve: the intercept is not finite.", call. = FALSE)
   }
-  logit_target <- log(target_success_rate / (1 - target_success_rate))
-  n_raw     <- (logit_target - intercept) / slope
-  list(
-    n_raw     = n_raw,
-    n_rounded = as.integer(ceiling(n_raw))
-  )
+  gap <- stats::qlogis(target) - intercept
+  n_raw <- if (is.finite(slope) && slope > 0) {
+    exp(gap / slope)
+  } else if (gap > 0) {
+    Inf
+  } else {
+    0
+  }
+  if (!is.finite(n_raw) || n_raw > n_max) {
+    return(as.integer(n_max))
+  }
+  max(1L, as.integer(ceiling(n_raw)))
 }
 
 
-#' Iteratively estimate the required sample size for one alpha.
+#' Estimate the smallest sample size reaching a target success rate for one alpha.
 #'
-#' At each iteration three pilot sample sizes are evaluated: 95%, 100%, and 105% of the current estimate.
-#' A binomial GLM is fitted to the resulting success counts and inverted to obtain the next estimate.
-#' Iteration stops when `abs(new_n - old_n) <= config$sample_size_tolerance` or `config$max_iterations` is reached.
-#' Sample sizes are always rounded up.
+#' Iterative solver. Each iteration simulates pilots at `n / f`, `n` and `n * f` (see `sample_size_pilots()`) with
+#' seed `config$seed` and accumulates them. The step type is chosen in this order:
+#' \enumerate{
+#'   \item No accumulated pilot has 0 < success_count < B (degenerate):
+#'     `expand_up` (all of this iteration's pilots failed; centre <- min(n_max, ceiling(f^2 * max(pilots)))),
+#'     `expand_down` (all succeeded; centre <- max(1, ceiling(min(pilots) / f^2))), or
+#'     `bisect` (the accumulated data brackets the answer; centre <- ceiling(sqrt(largest all-fail n *
+#'     smallest all-success n))). `f` is unchanged.
+#'   \item Otherwise fit `fit_success_curve()` on all accumulated pilots. A non-finite or non-positive slope gives
+#'     `flat`: the slope is taken as 0, so centre <- `n_max` (fitted success below target) or 1 (above), via
+#'     `solve_success_curve()`; `f` unchanged, no convergence check.
+#'   \item Otherwise `fit`: centre <- `solve_success_curve()`; converged when `|new_n - n| / n <= rel_tol`; then
+#'     `f <- max(f_floor, sqrt(f))`. Convergence is only checked on `fit` steps.
+#' }
+#' No clamping is applied to any step other than the `n_max` cap.
 #'
-#' @param alpha   Positive scalar Beta shape parameter.
-#' @param n_init  Initial sample-size estimate (positive integer).
-#' @param config  Named list; must contain all fields required by `simulate_success_at_n()` plus:
-#'   \describe{
-#'     \item{success_rate_target}{Target success probability in (0, 1).}
-#'     \item{sample_size_tolerance}{Stopping tolerance (non-negative integer or numeric).}
-#'     \item{max_iterations}{Maximum number of iterations (positive integer).}
-#'   }
+#' @param alpha    Numeric scalar passed through to `simulate`.
+#' @param n_init   Starting centre (>= 1); rounded up and capped at `n_max`.
+#' @param config   List with `success_rate_target`, `rel_tol`, `max_iterations`, `B`, `f0`, `f_floor`, `seed`, and
+#'   optionally `n_max` (default 1e9): the cap on every centre and pilot, and the fallback target when the solved n
+#'   is not finite or too large.
+#' @param simulate Function `(alpha, n, config, seed)` returning a list with at least `success_count`.
+#'   Defaults to `simulate_success_at_n()`; injectable for testing.
 #'
-#' @return List with:
-#'   \describe{
-#'     \item{final_n}{Final integer sample-size estimate.}
-#'     \item{stopping_reason}{Character; `"tolerance"` or `"max_iterations"`.}
-#'     \item{iterations_used}{Integer; number of iterations performed.}
-#'     \item{diagnostics}{Long-format `data.frame` with one row per pilot
-#'       point per iteration.}
-#'   }
-iterate_sample_size_for_alpha <- function(alpha, n_init, config) {
+#' @return List with `final_n` (integer), `stopping_reason` ("tolerance", "max_iterations" or "n_max"),
+#'   `iterations_used`, and `diagnostics`: a data.frame with one row per pilot per iteration and columns alpha,
+#'   iteration, step, n, success_count, success_rate, f, glm_intercept, glm_slope, n_next, stopping_reason (NA except
+#'   in the final row). `f` is the value used for that iteration's pilots. When the final centre is at `n_max`, returns
+#'   `n_max` with stopping_reason "n_max" and a warning. Otherwise warns when stopping at max_iterations after at
+#'   least one `fit` step, and errors when no `fit` step ever happened.
+estimate_sample_size <- function(
+  alpha,
+  n_init,
+  config,
+  simulate = simulate_success_at_n
+) {
   stopifnot(
-    is.numeric(alpha), length(alpha) == 1L, alpha > 0,
-    is.numeric(n_init), length(n_init) == 1L, n_init >= 1L
+    is.numeric(n_init),
+    length(n_init) == 1L,
+    is.finite(n_init),
+    n_init >= 1,
+    is.function(simulate)
   )
-  target    <- config$success_rate_target
-  tolerance <- config$sample_size_tolerance
-  max_iter  <- config$max_iterations
-  B         <- config$B
-  stopifnot(
-    is.numeric(target),    length(target)    == 1L, target > 0,    target < 1,
-    is.numeric(tolerance), length(tolerance) == 1L, tolerance >= 0,
-    is.numeric(max_iter) || is.integer(max_iter),
-    length(max_iter) == 1L, max_iter >= 1L
-  )
+  target <- config$success_rate_target
+  rel_tol <- config$rel_tol
+  max_iter <- config$max_iterations
+  B <- config$B
+  f0 <- config$f0
+  f_floor <- config$f_floor
+  base_seed <- config$seed
+  is_scalar <- function(x) is.numeric(x) && length(x) == 1L && is.finite(x)
+  if (!is_scalar(target) || target <= 0 || target >= 1) {
+    stop(
+      "`config$success_rate_target` must be a single number in (0, 1).",
+      call. = FALSE
+    )
+  }
+  if (!is_scalar(rel_tol) || rel_tol < 0) {
+    stop("`config$rel_tol` must be a single number >= 0.", call. = FALSE)
+  }
+  if (!is_scalar(max_iter) || max_iter < 1) {
+    stop("`config$max_iterations` must be a single number >= 1.", call. = FALSE)
+  }
+  if (!is_scalar(B) || B < 1) {
+    stop("`config$B` must be a single number >= 1.", call. = FALSE)
+  }
+  if (!is_scalar(f0) || f0 <= 1) {
+    stop("`config$f0` must be a single number > 1.", call. = FALSE)
+  }
+  if (!is_scalar(f_floor) || f_floor <= 1 || f_floor > f0) {
+    stop(
+      "`config$f_floor` must be a single number with 1 < f_floor <= f0.",
+      call. = FALSE
+    )
+  }
+  if (!is_scalar(base_seed)) {
+    stop("`config$seed` must be a single finite number.", call. = FALSE)
+  }
+  n_max <- if (is.null(config$n_max)) 1e9 else config$n_max
+  if (!is_scalar(n_max) || n_max < 1 || n_max > .Machine$integer.max) {
+    stop("`config$n_max` must be a single number in [1, .Machine$integer.max].", call. = FALSE)
+  }
+  n_max <- as.integer(floor(n_max))
   max_iter <- as.integer(max_iter)
 
-  current_n      <- as.integer(ceiling(n_init))
-  diag_rows      <- vector("list", max_iter * 3L)
-  diag_idx       <- 0L
-  stopping_reason <- "max_iterations"
+  n <- as.integer(min(n_max, ceiling(n_init)))
+  f <- f0
+  acc_n <- integer(0L)
+  acc_s <- integer(0L)
+  diag_rows <- vector("list", max_iter)
+  last_fit_n <- NA_integer_
+  converged <- FALSE
+  iter <- 0L
 
-  # Pre-allocate accumulated pilot data across all iterations (for GLM fitting)
-  all_pilot_ns       <- integer(max_iter * 3L)
-  all_success_counts <- integer(max_iter * 3L)
-  n_accumulated      <- 0L
-
-  for (iter in seq_len(max_iter)) {
-    pilot_ns <- as.integer(ceiling(c(0.95, 1.00, 1.05) * current_n))
-    pilot_ns <- pmax(pilot_ns, 1L)   # guard against n < 1
-
-    success_counts <- integer(3L)
-    success_rates  <- numeric(3L)
-
-    for (j in seq_along(pilot_ns)) {
-      sim_j            <- simulate_success_at_n(alpha, pilot_ns[j], config)
-      success_counts[j] <- sim_j$success_count
-      success_rates[j]  <- sim_j$success_rate
-    }
-
-    # Accumulate evidence: add this iteration's pilot points to the history
-    idx <- n_accumulated + seq_len(3L)
-    all_pilot_ns[idx]       <- pilot_ns
-    all_success_counts[idx] <- success_counts
-    n_accumulated           <- n_accumulated + 3L
-
-    glm_fit  <- fit_success_glm(
-      all_pilot_ns[seq_len(n_accumulated)],
-      all_success_counts[seq_len(n_accumulated)],
-      B
+  while (iter < max_iter && !converged) {
+    iter <- iter + 1L
+    pilots <- sample_size_pilots(n, f, n_max)
+    s <- vapply(
+      pilots,
+      function(p) {
+        as.integer(
+          simulate(
+            alpha = alpha,
+            n = p,
+            config = config,
+            seed = base_seed
+          )$success_count
+        )
+      },
+      integer(1L)
     )
-    solved   <- tryCatch(
-      solve_sample_size_from_glm(glm_fit, target),
-      error = function(e) list(n_raw = current_n, n_rounded = current_n)
-    )
-    new_n <- as.integer(ceiling(solved$n_rounded))
-
-    # Clamp the new estimate to prevent extreme jumps when the pilot success
-    # rates are all near 0% or all near 100%.
-    # - If mean success rate < target (need more n): cap at 2x the largest pilot.
-    # - If mean success rate >= target (need less n): floor at 0.5x the smallest pilot.
-    mean_success_rate <- mean(success_rates)
-    if (mean_success_rate < target) {
-      upper_bound <- as.integer(ceiling(2.0 * max(pilot_ns)))
-      new_n <- min(new_n, upper_bound)
-      if(is.na(new_n)){new_n <- upper_bound}
-    } else {
-      lower_bound <- as.integer(ceiling(0.5 * min(pilot_ns)))
-      new_n <- max(new_n, lower_bound)
-      if(is.na(new_n)){new_n <- lower_bound}
-    }
-    new_n <- pmax(new_n, 1L)
-
-    coefs <- stats::coef(glm_fit)
-    n_unclamped <- as.integer(ceiling(solved$n_rounded))
-    clamped     <- (new_n != n_unclamped)
-
-    for (j in seq_along(pilot_ns)) {
-      diag_idx <- diag_idx + 1L
-      diag_rows[[diag_idx]] <- data.frame(
-        alpha               = alpha,
-        iteration           = iter,
-        pilot_index         = j,
-        n                   = pilot_ns[j],
-        success_count       = success_counts[j],
-        success_rate        = success_rates[j],
-        target_success_rate = target,
-        glm_intercept       = coefs[[1L]],
-        glm_slope           = coefs[[2L]],
-        n_raw               = solved$n_raw,
-        n_rounded           = new_n,
-        n_clamped           = clamped,
-        stopping_reason     = NA_character_,
-        stringsAsFactors    = FALSE
+    if (anyNA(s) || any(s < 0L) || any(s > B)) {
+      stop(
+        sprintf(
+          "`simulate` returned a success_count outside [0, B] at iteration %d.",
+          iter
+        ),
+        call. = FALSE
       )
     }
+    acc_n <- c(acc_n, pilots)
+    acc_s <- c(acc_s, s)
 
-    if (abs(new_n - current_n) <= tolerance) {
-      stopping_reason <- "tolerance"
-      current_n       <- new_n
-      break
+    intercept <- NA_real_
+    slope <- NA_real_
+    f_used <- f
+
+    if (!any(acc_s > 0L & acc_s < B)) {
+      if (all(s == 0L)) {
+        step <- "expand_up"
+        n_next <- as.integer(min(n_max, ceiling(f^2 * max(pilots))))
+      } else if (all(s == B)) {
+        step <- "expand_down"
+        n_next <- max(1L, as.integer(ceiling(min(pilots) / f^2)))
+      } else {
+        step <- "bisect"
+        n_fail <- max(acc_n[acc_s == 0L])
+        n_pass <- min(acc_n[acc_s == B])
+        n_next <- as.integer(ceiling(sqrt(n_fail * n_pass)))
+      }
+    } else {
+      fit <- fit_success_curve(acc_n, acc_s, B)
+      coefs <- stats::coef(fit)
+      intercept <- unname(coefs[[1L]])
+      slope <- unname(coefs[[2L]])
+      if (!is.finite(slope) || slope <= 0) {
+        step <- "flat"
+        n_next <- solve_success_curve(fit, target, n_max)
+      } else {
+        step <- "fit"
+        n_next <- solve_success_curve(fit, target, n_max)
+        converged <- abs(n_next - n) / n <= rel_tol
+        f <- max(f_floor, sqrt(f))
+        last_fit_n <- n_next
+      }
     }
-    current_n <- new_n
+
+    diag_rows[[iter]] <- data.frame(
+      alpha = alpha,
+      iteration = iter,
+      step = step,
+      n = pilots,
+      success_count = s,
+      success_rate = s / B,
+      f = f_used,
+      glm_intercept = intercept,
+      glm_slope = slope,
+      n_next = n_next,
+      stopping_reason = NA_character_,
+      stringsAsFactors = FALSE
+    )
+    n <- n_next
   }
 
-  diagnostics <- do.call(rbind, diag_rows[seq_len(diag_idx)])
+  diagnostics <- do.call(rbind, diag_rows[seq_len(iter)])
+  rownames(diagnostics) <- NULL
+  if (n == n_max) {
+    stopping_reason <- "n_max"
+    last_fit_n <- n_max
+    warning(
+      sprintf(
+        "Sample-size solver for alpha = %s ended at the cap n_max = %d; the required n is likely larger.",
+        format(alpha),
+        n_max
+      ),
+      call. = FALSE
+    )
+  } else if (converged) {
+    stopping_reason <- "tolerance"
+  } else if (!is.na(last_fit_n)) {
+    stopping_reason <- "max_iterations"
+    warning(
+      sprintf(
+        "Sample-size solver for alpha = %s did not converge within %d iterations; returning last fitted n = %d.",
+        format(alpha),
+        max_iter,
+        last_fit_n
+      ),
+      call. = FALSE
+    )
+  } else {
+    stop(
+      sprintf(
+        paste0(
+          "Sample-size solver for alpha = %s made no successful curve fit in %d iterations (last step: %s). ",
+          "The success curve never showed a positive slope in log(n); increase max_iterations or check the simulator."
+        ),
+        format(alpha),
+        max_iter,
+        diagnostics$step[nrow(diagnostics)]
+      ),
+      call. = FALSE
+    )
+  }
   diagnostics$stopping_reason[nrow(diagnostics)] <- stopping_reason
 
   list(
-    final_n         = current_n,
+    final_n = last_fit_n,
     stopping_reason = stopping_reason,
-    iterations_used = as.integer(diag_idx / 3L),
-    diagnostics     = diagnostics
+    iterations_used = iter,
+    diagnostics = diagnostics
   )
 }
