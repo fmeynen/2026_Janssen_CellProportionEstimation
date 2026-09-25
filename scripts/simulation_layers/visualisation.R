@@ -289,6 +289,8 @@ plot_success_rate_vs_n <- function(result, target = NULL, smooth = FALSE) {
 
 #' Plot Dirichlet-multinomial success rate vs threshold (tau).
 #'
+#' One panel per alpha; within a panel, one curve per n_people (colour).
+#'
 #' @param curves_tau data.frame with columns `alpha`, `n_people`, `metric`,
 #'   `tau`, `success_rate` (as produced by the errorchoice tau-sweep, with
 #'   `n_per_person` held fixed).
@@ -326,20 +328,19 @@ plot_success_vs_tau <- function(curves_tau, metric, subtitle = NULL, target = NU
     ggplot2::aes(
       x = tau,
       y = success_rate,
-      color = factor(alpha),
-      linetype = factor(n_people),
-      group = interaction(alpha, n_people)
+      color = factor(n_people),
+      group = factor(n_people)
     )
   ) +
     ggplot2::geom_line() +
     ggplot2::geom_point(size = 0.6) +
+    ggplot2::facet_wrap(~alpha, labeller = ggplot2::label_both) +
     ggplot2::scale_color_viridis_d(end = 0.85) +
     ggplot2::ylim(0, 1) +
     ggplot2::labs(
       x        = "Threshold (tau)",
       y        = "Success rate",
-      color    = "alpha",
-      linetype = "n_people",
+      color    = "n_people",
       title    = sprintf("%s: success rate vs threshold", metric),
       subtitle = subtitle
     ) +
@@ -354,6 +355,8 @@ plot_success_vs_tau <- function(curves_tau, metric, subtitle = NULL, target = NU
 
 
 #' Plot Dirichlet-multinomial success rate vs cells per person.
+#'
+#' One panel per alpha; within a panel, one curve per n_people (colour).
 #'
 #' @param curves_n  data.frame with columns `alpha`, `n_people`,
 #'   `n_per_person`, `metric`, `tau`, `success_rate` (as produced by the
@@ -392,21 +395,20 @@ plot_success_vs_n <- function(curves_n, metric, subtitle = NULL, target = 0.95) 
     ggplot2::aes(
       x = n_per_person,
       y = success_rate,
-      color = factor(alpha),
-      linetype = factor(n_people),
-      group = interaction(alpha, n_people)
+      color = factor(n_people),
+      group = factor(n_people)
     )
   ) +
     ggplot2::geom_line() +
     ggplot2::geom_point() +
+    ggplot2::facet_wrap(~alpha, labeller = ggplot2::label_both) +
     ggplot2::scale_color_viridis_d(end = 0.85) +
     ggplot2::scale_x_log10() +
     ggplot2::ylim(0, 1) +
     ggplot2::labs(
       x        = "Cells per person (n_per_person, log scale)",
       y        = "Success rate",
-      color    = "alpha",
-      linetype = "n_people",
+      color    = "n_people",
       title    = sprintf("%s: success rate vs cells per person", metric),
       subtitle = subtitle
     ) +
