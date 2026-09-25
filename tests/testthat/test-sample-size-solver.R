@@ -45,6 +45,12 @@ test_that("sample_size_pilots rounds up, de-duplicates, sorts and floors at 1", 
   expect_error(sample_size_pilots(10, 1))
 })
 
+test_that("sample_size_pilots caps pilots at n_max", {
+  expect_identical(sample_size_pilots(1e9, 2), c(500000000L, 1000000000L))
+  expect_identical(sample_size_pilots(100, 2, n_max = 150), c(50L, 100L, 150L))
+  expect_error(sample_size_pilots(100, 2, n_max = 3e9))
+})
+
 test_that("fit_success_curve recovers a logistic curve on log(n)", {
   n <- c(100, 200, 400, 800, 1600)
   B <- 1e6
@@ -72,9 +78,23 @@ test_that("solve_success_curve inverts the curve and rounds up", {
   expect_gte(out, n_raw)
 })
 
-test_that("solve_success_curve refuses a non-positive slope", {
-  fit <- fit_success_curve(c(10, 20, 40), c(90L, 50L, 10L), 100L)
-  expect_error(solve_success_curve(fit, 0.95), "slope")
+test_that("solve_success_curve treats a negative slope as 0", {
+  # Decreasing curve fitted below the target everywhere: a flat curve never reaches it -> n_max.
+  below <- fit_success_curve(c(10, 20, 40), c(40L, 30L, 20L), 100L)
+  expect_lt(stats::coef(below)[[2]], 0)
+  expect_identical(solve_success_curve(below, 0.95), 1000000000L)
+  expect_identical(solve_success_curve(below, 0.95, n_max = 5000), 5000L)
+  # Decreasing curve fitted above the target: a flat curve already exceeds it -> 1.
+  above <- fit_success_curve(c(10, 20, 40), c(90L, 50L, 10L), 100L)
+  expect_identical(solve_success_curve(above, 0.95), 1L)
+})
+
+test_that("solve_success_curve falls back to n_max when the solved n is too large", {
+  # Barely positive slope far below the target: the solved n overflows the integer range.
+  fit <- fit_success_curve(c(10, 1000, 1e5), c(10L, 11L, 12L), 100L)
+  expect_gt(stats::coef(fit)[[2]], 0)
+  expect_identical(solve_success_curve(fit, 0.95), 1000000000L)
+  expect_identical(solve_success_curve(fit, 0.95, n_max = 2e6), 2000000L)
 })
 
 
@@ -164,31 +184,47 @@ test_that("a pure step function that is never resolved errors out", {
 })
 
 
-# Resample ----------------------------------------------------------------------------------------------------------
+# Flat steps and the n_max cap ------------------------------------------------------------------------------------
 
-test_that("a decreasing curve triggers resample with the next seed", {
-  cfg <- make_solver_config()
+test_that("a decreasing curve below the target gives a flat step to n_max and ends flagged at the cap", {
+  cfg <- make_solver_config(n_max = 1e5, max_iterations = 5L)
   seeds_seen <- integer(0L)
-  flips <- function(alpha, n, config, seed) {
+  below <- function(alpha, n, config, seed) {
     seeds_seen <<- c(seeds_seen, seed)
-    # Seed offset 0: a flat, slightly decreasing curve near the target (as Monte Carlo noise could produce around n*).
-    # Afterwards: the true increasing curve.
-    rate <- if (seed == config$seed) stats::plogis(3.5 - 0.07 * log(n)) else stats::plogis(-20 + 3 * log(n))
-    s <- as.integer(round(config$B * rate))
+    s <- as.integer(round(config$B * stats::plogis(-0.5 - 0.1 * log(n))))
     list(success_count = s, success_rate = s / config$B)
   }
-  res <- estimate_sample_size(0.1, 2000, cfg, simulate = flips)
+  expect_warning(res <- estimate_sample_size(0.1, 2000, cfg, simulate = below), "n_max")
   d <- res$diagnostics
-  expect_identical(d$step[d$iteration == 1L][1], "resample")
+  expect_identical(d$step[d$iteration == 1L][1], "flat")
   expect_lt(d$glm_slope[d$iteration == 1L][1], 0)
-  expect_identical(unique(d$n_next[d$iteration == 1L]), 2000L)
-  expect_identical(unique(d$seed_offset[d$iteration == 1L]), 0L)
-  expect_identical(unique(d$seed_offset[d$iteration == 2L]), 1L)
+  expect_identical(unique(d$n_next[d$iteration == 1L]), 100000L)
   expect_identical(unique(d$f[d$iteration == 2L]), cfg$f0)
-  expect_identical(unique(seeds_seen[1:3]), cfg$seed)
-  expect_true(all(seeds_seen[-(1:3)] > cfg$seed))
-  expect_true("fit" %in% d$step)
-  expect_identical(res$stopping_reason, "tolerance")
+  expect_true(all(d$n <= 100000L))
+  expect_true(all(seeds_seen == cfg$seed))
+  expect_identical(res$stopping_reason, "n_max")
+  expect_identical(res$final_n, 100000L)
+})
+
+test_that("flat steps below the cap never count as a fit, so the solver still errors", {
+  cfg <- make_solver_config(max_iterations = 1L)
+  above <- function(alpha, n, config, seed) {
+    s <- as.integer(round(config$B * stats::plogis(3.5 - 0.07 * log(n))))
+    list(success_count = s, success_rate = s / config$B)
+  }
+  expect_error(res <- estimate_sample_size(0.1, 2000, cfg, simulate = above), "no successful curve fit")
+})
+
+test_that("expand_up is capped at n_max and the result is flagged", {
+  cfg <- make_solver_config(n_max = 5000)
+  always_fail <- function(alpha, n, config, seed) list(success_count = 0L)
+  expect_warning(res <- estimate_sample_size(0.1, 10, cfg, simulate = always_fail), "n_max")
+  d <- res$diagnostics
+  expect_true(all(d$step == "expand_up"))
+  expect_true(all(d$n <= 5000L))
+  expect_identical(res$final_n, 5000L)
+  expect_identical(res$stopping_reason, "n_max")
+  expect_identical(d$stopping_reason[nrow(d)], "n_max")
 })
 
 test_that("errors when the slope never becomes positive", {
@@ -240,11 +276,11 @@ test_that("diagnostics have the documented shape and final stopping_reason", {
   cfg <- make_solver_config()
   res <- estimate_sample_size(0.25, 10, cfg, simulate = make_logistic_sim())
   d <- res$diagnostics
-  expect_named(d, c("alpha", "iteration", "step", "n", "success_count", "success_rate", "f", "seed_offset",
+  expect_named(d, c("alpha", "iteration", "step", "n", "success_count", "success_rate", "f",
                     "glm_intercept", "glm_slope", "n_next", "stopping_reason"))
   expect_named(res, c("final_n", "stopping_reason", "iterations_used", "diagnostics"))
   expect_true(all(d$alpha == 0.25))
-  expect_true(all(d$step %in% c("fit", "expand_up", "expand_down", "bisect", "resample")))
+  expect_true(all(d$step %in% c("fit", "expand_up", "expand_down", "bisect", "flat")))
   expect_identical(max(d$iteration), res$iterations_used)
   expect_equal(d$success_rate, d$success_count / cfg$B)
   expect_true(all(is.na(d$glm_slope[d$step %in% c("expand_up", "expand_down", "bisect")])))
@@ -272,4 +308,6 @@ test_that("config is validated up front", {
   expect_error(estimate_sample_size(0.1, 10, make_solver_config(f_floor = 1), sim), "f_floor")
   expect_error(estimate_sample_size(0.1, 10, make_solver_config(f_floor = 3), sim), "f_floor")
   expect_error(estimate_sample_size(0.1, 10, make_solver_config(B = 0), sim), "B")
+  expect_error(estimate_sample_size(0.1, 10, make_solver_config(n_max = 3e9), sim), "n_max")
+  expect_error(estimate_sample_size(0.1, 10, make_solver_config(n_max = 0), sim), "n_max")
 })

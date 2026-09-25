@@ -27,17 +27,15 @@ library(ggplot2)
 
 simulation_sample_size_defaults <- function(n_init = 200000) {
   list(
-    alpha                = seq(from = 2, to = 5, by = 0.05),
+    alpha                = seq(from = 2, to = 5, by = 0.5),
     K                    = 10L,
     n_init               = n_init,
     B                    = 500L,
     taus                 = list(AE = 0.002, ARE = 0.05),
     metrics              = c("AE", "ARE"),
-    model                = "multinomial",
-    # To switch to the Dirichlet-multinomial model instead:
-    #   model         = "dirichlet_multinomial",
-    #   n_people      = <people per replicate>,
-    #   concentration = <Dirichlet concentration parameter>,
+    n_people             = 2,
+    concentration        = 50,
+    model                = "dirichlet_multinomial",
     # `n_init` (and, at solve time, `n`) then means cells sampled per person, not total cells.
     n_people             = NULL,
     concentration        = NULL,
@@ -48,7 +46,8 @@ simulation_sample_size_defaults <- function(n_init = 200000) {
     rel_tol              = 0.01,
     max_iterations       = 20L,
     f0                   = 2,
-    f_floor              = 1.1
+    f_floor              = 1.1,
+    n_max                = 1e9
   )
 }
 
