@@ -284,6 +284,142 @@ plot_success_rate_vs_n <- function(result, target = NULL, smooth = FALSE) {
 }
 
 
+# Dirichlet-multinomial errorchoice ---------------------------------------------------------------------------------
+
+
+#' Plot Dirichlet-multinomial success rate vs threshold (tau).
+#'
+#' @param curves_tau data.frame with columns `alpha`, `n_people`, `metric`,
+#'   `tau`, `success_rate` (as produced by the errorchoice tau-sweep, with
+#'   `n_per_person` held fixed).
+#' @param metric     Character scalar; the metric to plot (e.g. `"AE"` or
+#'   `"ARE"`).
+#' @param subtitle   Optional character scalar; passed through to `labs()`
+#'   (e.g. to state the fixed `n_per_person`).
+#' @param target     Optional numeric scalar; if supplied, draws a dashed
+#'   horizontal reference line at this success rate.
+#'
+#' @return A ggplot object.
+plot_success_vs_tau <- function(curves_tau, metric, subtitle = NULL, target = NULL) {
+  if (!is.data.frame(curves_tau)) {
+    stop("curves_tau must be a data.frame.", call. = FALSE)
+  }
+  required_cols <- c("alpha", "n_people", "metric", "tau", "success_rate")
+  missing_cols <- setdiff(required_cols, names(curves_tau))
+  if (length(missing_cols) > 0L) {
+    stop(
+      sprintf("curves_tau is missing required columns: %s", paste(missing_cols, collapse = ", ")),
+      call. = FALSE
+    )
+  }
+  if (!is.character(metric) || length(metric) != 1L || is.na(metric)) {
+    stop("metric must be a single character string.", call. = FALSE)
+  }
+
+  df <- curves_tau[curves_tau$metric == metric, , drop = FALSE]
+  if (nrow(df) == 0L) {
+    stop(sprintf("No rows in curves_tau match metric '%s'.", metric), call. = FALSE)
+  }
+
+  p <- ggplot2::ggplot(
+    df,
+    ggplot2::aes(
+      x = tau,
+      y = success_rate,
+      color = factor(alpha),
+      linetype = factor(n_people),
+      group = interaction(alpha, n_people)
+    )
+  ) +
+    ggplot2::geom_line() +
+    ggplot2::geom_point(size = 0.6) +
+    ggplot2::scale_color_viridis_d(end = 0.85) +
+    ggplot2::ylim(0, 1) +
+    ggplot2::labs(
+      x        = "Threshold (tau)",
+      y        = "Success rate",
+      color    = "alpha",
+      linetype = "n_people",
+      title    = sprintf("%s: success rate vs threshold", metric),
+      subtitle = subtitle
+    ) +
+    ggplot2::theme_bw()
+
+  if (!is.null(target)) {
+    p <- p + ggplot2::geom_hline(yintercept = target, linetype = "dashed")
+  }
+
+  p
+}
+
+
+#' Plot Dirichlet-multinomial success rate vs cells per person.
+#'
+#' @param curves_n  data.frame with columns `alpha`, `n_people`,
+#'   `n_per_person`, `metric`, `tau`, `success_rate` (as produced by the
+#'   errorchoice n_per_person-sweep, with `tau` held fixed per metric).
+#' @param metric    Character scalar; the metric to plot (e.g. `"AE"` or
+#'   `"ARE"`).
+#' @param subtitle  Optional character scalar; passed through to `labs()`
+#'   (e.g. to state the fixed `tau`).
+#' @param target    Numeric scalar (default `0.95`); if non-`NULL`, draws a
+#'   dashed horizontal reference line at this success rate.
+#'
+#' @return A ggplot object.
+plot_success_vs_n <- function(curves_n, metric, subtitle = NULL, target = 0.95) {
+  if (!is.data.frame(curves_n)) {
+    stop("curves_n must be a data.frame.", call. = FALSE)
+  }
+  required_cols <- c("alpha", "n_people", "n_per_person", "metric", "tau", "success_rate")
+  missing_cols <- setdiff(required_cols, names(curves_n))
+  if (length(missing_cols) > 0L) {
+    stop(
+      sprintf("curves_n is missing required columns: %s", paste(missing_cols, collapse = ", ")),
+      call. = FALSE
+    )
+  }
+  if (!is.character(metric) || length(metric) != 1L || is.na(metric)) {
+    stop("metric must be a single character string.", call. = FALSE)
+  }
+
+  df <- curves_n[curves_n$metric == metric, , drop = FALSE]
+  if (nrow(df) == 0L) {
+    stop(sprintf("No rows in curves_n match metric '%s'.", metric), call. = FALSE)
+  }
+
+  p <- ggplot2::ggplot(
+    df,
+    ggplot2::aes(
+      x = n_per_person,
+      y = success_rate,
+      color = factor(alpha),
+      linetype = factor(n_people),
+      group = interaction(alpha, n_people)
+    )
+  ) +
+    ggplot2::geom_line() +
+    ggplot2::geom_point() +
+    ggplot2::scale_color_viridis_d(end = 0.85) +
+    ggplot2::scale_x_log10() +
+    ggplot2::ylim(0, 1) +
+    ggplot2::labs(
+      x        = "Cells per person (n_per_person, log scale)",
+      y        = "Success rate",
+      color    = "alpha",
+      linetype = "n_people",
+      title    = sprintf("%s: success rate vs cells per person", metric),
+      subtitle = subtitle
+    ) +
+    ggplot2::theme_bw()
+
+  if (!is.null(target)) {
+    p <- p + ggplot2::geom_hline(yintercept = target, linetype = "dashed")
+  }
+
+  p
+}
+
+
 # Hybrid Cutoff ---------------------------------------------------------------------------------------------------
 
 
