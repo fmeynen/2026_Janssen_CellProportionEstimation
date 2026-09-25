@@ -64,10 +64,10 @@ simulation_dm_errorchoice_defaults <- function() {
     concentration = 50,
     n_per_person_fixed = 200000L,
     n_per_person_grid = as.integer(round(10^seq(4, 8, by = 0.25))),
-    taus_fixed = list(AE = 0.02, ARE = 0.5),
+    taus_fixed = list(AE = 0.05, ARE = 2),
     taus = list(AE = NULL, ARE = NULL),
     tau_grid_points = 200L,
-    tau_grid_prob = 0.99,
+    tau_grid_prob = 0.95,
     target = 0.95,
     seed = 260926L
   )
