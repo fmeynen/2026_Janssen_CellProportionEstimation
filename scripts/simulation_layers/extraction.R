@@ -150,6 +150,106 @@ extract_phat_long <- function(rep_out, alpha_i, p_max_i, B) {
 # Dirichlet-multinomial success rate ------------------------------------------------------------------------------
 
 
+#' Compute the per-replicate max-mean-error success statistic for one metric.
+#'
+#' Single source of truth for the Dirichlet-multinomial success statistic used by `replicate_success()` (and by
+#' any caller that needs the raw per-replicate statistic, e.g. to evaluate many tau thresholds via
+#' `mean(stat <= tau)` without recomputation). For the given metric, the error is first averaged over persons per
+#' (scenario, replicate, cell type), and the largest of these cell-type means is taken per (scenario, replicate)
+#' -- this is the per-replicate "stat". A replicate passes this metric iff `stat <= tau`. `NaN` errors (e.g. ARE
+#' with true and observed proportion both 0) count as 0; `Inf` errors are kept, so the corresponding mean/max may
+#' be `Inf`.
+#'
+#' The computation is fully vectorised: integer group keys, `rowsum()` for the per-cell-type means, and a single
+#' `order()` + `duplicated()` pass for the max-by-group step. There is no `stats::aggregate()` call, no
+#' `tapply()`, and no per-row loop.
+#'
+#' @param person_results Data.frame with at least the columns `replicate`, `cell_type`, `metric`, `error`. A
+#'   `scenario_id` column is optional: when it is absent, or present but entirely `NA`, all rows are treated as a
+#'   single scenario and the output's `scenario_id` is `NA_character_`.
+#' @param metric Single metric name (character scalar). Rows of `person_results` are filtered to this metric; an
+#'   error is raised if none match.
+#'
+#' @return Data.frame with one row per (scenario_id, replicate), sorted by scenario_id then replicate, with
+#'   columns scenario_id, replicate, stat (max over cell types of the mean-over-persons error).
+replicate_max_mean_error <- function(person_results, metric) {
+  required_cols <- c("replicate", "cell_type", "metric", "error")
+  if (!is.data.frame(person_results) || !all(required_cols %in% names(person_results))) {
+    stop("person_results must be a data.frame with columns replicate, cell_type, metric, error.", call. = FALSE)
+  }
+  if (!is.character(metric) || length(metric) != 1L || is.na(metric)) {
+    stop("metric must be a single character string.", call. = FALSE)
+  }
+
+  idx <- person_results$metric == metric
+  if (!any(idx)) {
+    stop(sprintf("metric '%s' is not present in person_results.", metric), call. = FALSE)
+  }
+
+  # A missing/all-NA scenario_id is replaced by a non-NA sentinel for grouping purposes (rowsum() drops NA
+  # groups), and mapped back to NA_character_ in the output.
+  has_scenario <- "scenario_id" %in% names(person_results)
+  scenario_raw <- if (has_scenario) {
+    as.character(person_results$scenario_id)
+  } else {
+    rep(NA_character_, nrow(person_results))
+  }
+  no_scenario <- all(is.na(scenario_raw))
+  scenario_key <- if (no_scenario) rep("__single_scenario__", length(scenario_raw)) else scenario_raw
+
+  scenario_i  <- scenario_key[idx]
+  replicate_i <- person_results$replicate[idx]
+  cell_type_i <- person_results$cell_type[idx]
+  error_i     <- person_results$error[idx]
+  error_i[is.nan(error_i)] <- 0
+
+  scenario_lv  <- sort(unique(scenario_i))
+  replicate_lv <- sort(unique(replicate_i))
+  cell_type_lv <- sort(unique(cell_type_i))
+  nS <- length(scenario_lv)
+  nR <- length(replicate_lv)
+  nC <- length(cell_type_lv)
+
+  s_idx <- match(scenario_i, scenario_lv)
+  r_idx <- match(replicate_i, replicate_lv)
+  c_idx <- match(cell_type_i, cell_type_lv)
+
+  # Stage 1: mean over persons per (scenario, replicate, cell_type) via one integer group key and rowsum().
+  key1 <- (s_idx - 1L) * nR * nC + (r_idx - 1L) * nC + c_idx
+  sums1_mat   <- rowsum(error_i, key1)
+  counts1_mat <- rowsum(rep(1L, length(error_i)), key1)
+  means1 <- sums1_mat[, 1L] / counts1_mat[, 1L]
+  key1_sorted <- as.numeric(rownames(sums1_mat))
+
+  tmp1 <- (key1_sorted - 1L) %/% nC
+  r1 <- (tmp1 %% nR) + 1L
+  s1 <- (tmp1 %/% nR) + 1L
+
+  # Stage 2: max over cell types per (scenario, replicate). Sort by group then by value descending and keep the
+  # first row of each group -- fully vectorised, no tapply()/aggregate() and no per-row loop.
+  key2 <- (s1 - 1L) * nR + r1
+  ord  <- order(key2, -means1)
+  keep <- !duplicated(key2[ord])
+  max_key2 <- key2[ord][keep]
+  stat     <- means1[ord][keep]
+
+  r2 <- ((max_key2 - 1L) %% nR) + 1L
+  s2 <- ((max_key2 - 1L) %/% nR) + 1L
+
+  out <- data.frame(
+    scenario_id = scenario_lv[s2],
+    replicate   = replicate_lv[r2],
+    stat        = stat,
+    stringsAsFactors = FALSE
+  )
+  if (no_scenario) out$scenario_id <- NA_character_
+
+  out <- out[order(out$scenario_id, out$replicate), , drop = FALSE]
+  rownames(out) <- NULL
+  out
+}
+
+
 #' Determine per-replicate success against a set of metric thresholds.
 #'
 #' Single source of truth for the replicate success rule shared by `extract_success_rate()` and, for the multinomial
@@ -158,7 +258,8 @@ extract_phat_long <- function(rep_out, alpha_i, p_max_i, B) {
 #' value is `<= tau`, and passes overall if it passes every metric in `taus`. `NaN` errors (e.g. ARE with true and
 #' observed proportion both 0) count as 0; `Inf` errors are kept, so the corresponding mean/max is `Inf`.
 #'
-#' The computation is fully vectorised (one `stats::aggregate()` pass per metric); there is no per-row loop.
+#' Per metric, the statistic is delegated to `replicate_max_mean_error()`, the single source of truth for the rule;
+#' this function only turns the resulting `stat` into a `pass_<metric>` flag per metric and ANDs them together.
 #'
 #' @param person_results Data.frame with at least the columns `replicate`, `cell_type`, `metric`, `error`. A
 #'   `scenario_id` column is optional: when it is absent, or present but entirely `NA`, all rows are treated as a
@@ -193,46 +294,19 @@ replicate_success <- function(person_results, taus) {
     stop("None of the metrics in taus are present in person_results.", call. = FALSE)
   }
 
-  # `stats::aggregate()` with a formula drops rows whose grouping value is NA, so a missing/all-NA scenario_id is
-  # replaced by a non-NA sentinel for grouping purposes, and mapped back to NA_character_ in the output.
-  has_scenario <- "scenario_id" %in% names(person_results)
-  scenario_raw <- if (has_scenario) {
-    as.character(person_results$scenario_id)
-  } else {
-    rep(NA_character_, nrow(person_results))
-  }
-  no_scenario <- all(is.na(scenario_raw))
-  scenario_key <- if (no_scenario) rep("__single_scenario__", length(scenario_raw)) else scenario_raw
-
   replicate_pass <- NULL
   for (m in metrics) {
-    idx <- person_results$metric == m
-    rows <- data.frame(
-      scenario_id = scenario_key[idx],
-      replicate = person_results$replicate[idx],
-      cell_type = person_results$cell_type[idx],
-      error = person_results$error[idx],
-      stringsAsFactors = FALSE
-    )
-    rows$error[is.nan(rows$error)] <- 0
-    cell_means <- stats::aggregate(error ~ scenario_id + replicate + cell_type, data = rows, FUN = mean,
-                                   na.action = stats::na.pass)
-    max_means <- stats::aggregate(error ~ scenario_id + replicate, data = cell_means, FUN = max,
-                                  na.action = stats::na.pass)
-    max_means[[paste0("pass_", m)]] <- max_means$error <= taus[[m]]
-    max_means$error <- NULL
+    stat_df <- replicate_max_mean_error(person_results, m)
+    stat_df[[paste0("pass_", m)]] <- stat_df$stat <= taus[[m]]
+    stat_df$stat <- NULL
     replicate_pass <- if (is.null(replicate_pass)) {
-      max_means
+      stat_df
     } else {
-      merge(replicate_pass, max_means, by = c("scenario_id", "replicate"))
+      merge(replicate_pass, stat_df, by = c("scenario_id", "replicate"))
     }
   }
   pass_cols <- paste0("pass_", metrics)
   replicate_pass$pass <- Reduce(`&`, replicate_pass[pass_cols])
-
-  if (no_scenario) {
-    replicate_pass$scenario_id <- NA_character_
-  }
 
   replicate_pass <- replicate_pass[order(replicate_pass$scenario_id, replicate_pass$replicate), , drop = FALSE]
   rownames(replicate_pass) <- NULL
