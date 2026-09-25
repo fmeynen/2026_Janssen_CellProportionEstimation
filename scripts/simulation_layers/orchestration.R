@@ -93,7 +93,7 @@ run_sample_size_experiment <- function(
     alpha_config$alpha <- alpha_i
     alpha_config$n_init <- n_init
     result_file <- simulation_result_path(
-      alpha_config,
+      c(alpha_config, list(success_rule = success_rule_id())),
       cache_dir,
       "sample_size"
     )
@@ -326,9 +326,10 @@ run_dirichlet_multinomial_experiment <- function(
 
 #' Run the Dirichlet-multinomial "errorchoice" experiment over an (alpha, n_people, n_per_person) grid.
 #'
-#' AE and ARE (or any other metrics in `metrics`) are studied separately: for each scenario (one combination of
-#' `alpha`, `n_people`, `n_per_person`) and each metric, every replicate is reduced immediately to one scalar
-#' "stat" -- the max, over cell types, of the mean-over-persons error -- via `replicate_max_mean_error()`. The
+#' AE and ARE are studied separately: for each scenario (one combination of `alpha`, `n_people`, `n_per_person`)
+#' and each metric, every replicate is reduced immediately to one scalar "stat" -- the max, over cell types, of the
+#' error of the person-pooled proportion estimate against the population proportion -- via
+#' `replicate_pooled_error()`. The
 #' full `person_results` produced by `run_replicates()` for a scenario are discarded as soon as they have been
 #' reduced to `stat` values, so memory use does not grow with the size of the (alpha, n_people, n_per_person)
 #' grid.
@@ -342,8 +343,8 @@ run_dirichlet_multinomial_experiment <- function(
 #'   population mean proportion vector (one vector per alpha, computed once and reused across the grid).
 #' @param K      Positive integer; number of cell types.
 #' @param B      Positive integer; number of replicates per scenario.
-#' @param metrics Character vector; error metrics to compute (forwarded to `run_replicates()` and
-#'   `replicate_max_mean_error()`), studied independently of one another.
+#' @param metrics Character vector; error metrics, any of `"AE"`, `"ARE"` (forwarded to `run_replicates()` and
+#'   `replicate_pooled_error()`), studied independently of one another.
 #' @param proportion_method Proportion-generation method forwarded to `generate_proportions()` (default
 #'   `"beta"`).
 #' @param n_people Positive integer vector; number(s) of people per replicate.
@@ -420,7 +421,7 @@ run_dm_errorchoice_experiment <- function(
       metric_rows <- vector("list", length(metrics))
       for (mi in seq_along(metrics)) {
         m <- metrics[[mi]]
-        stat_df <- replicate_max_mean_error(rep_out$person_results, m)
+        stat_df <- replicate_pooled_error(rep_out$person_results, m)
         metric_rows[[mi]] <- data.frame(
           alpha = alpha_j,
           n_people = n_people_j,

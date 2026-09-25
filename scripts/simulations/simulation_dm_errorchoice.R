@@ -3,16 +3,18 @@
 # Dirichlet-multinomial "errorchoice" simulation.
 #
 # Research question: for a population of persons whose latent cell-type composition varies around a population
-# mean (Dirichlet-multinomial hierarchy), how often does the *maximum* (over cell types) of the *mean-over-persons*
-# absolute (AE) or relative (ARE) error exceed a threshold tau -- as a function of alpha (population-composition
-# skew), n_people (persons per replicate) and n_per_person (cells sampled per person)?
+# mean (Dirichlet-multinomial hierarchy), how often does the *maximum* (over cell types) absolute (AE) or relative
+# (ARE) error of the person-pooled proportion estimate against the population proportion exceed a threshold tau --
+# as a function of alpha (population-composition skew), n_people (persons per replicate) and n_per_person (cells
+# sampled per person)? For cell type j: AE_j = |mean_i phat_ij - p_j|, ARE_j = AE_j / p_j.
 #
 # AE and ARE are studied separately throughout (never combined into a joint success criterion).
 #
 # Workflow
 #   1. Generate population mean proportions from a monotone Beta curve (deterministic), once per alpha.
 #   2. For each (alpha, n_people, n_per_person) scenario, simulate B Dirichlet-multinomial replicates and reduce
-#      each replicate immediately to one scalar "stat" per metric (max over cell types of the person-mean error).
+#      each replicate immediately to one scalar "stat" per metric (max over cell types of the pooled-estimate
+#      error; see replicate_pooled_error()).
 #      Common random numbers: the seed depends only on (alpha, n_people), identical across n_per_person.
 #   3. curves_tau: with n_per_person held fixed at `n_per_person_fixed`, sweep a tau grid to get success rate vs
 #      tau, per (alpha, n_people, metric).
@@ -53,19 +55,19 @@ lapply(simulation_helper_files, function(f) {
 #'   }
 simulation_dm_errorchoice_defaults <- function() {
   list(
-    alpha = c(2, 2.5, 3, 4, 5),
+    alpha = c(2, 3, 4, 5),
     K = 10L,
     B = 1000L,
     metrics = c("AE", "ARE"),
     proportion_method = "beta",
     n_people = c(1L, 2L, 3L, 5L, 10L),
     concentration = 50,
-    n_per_person_fixed = 100000L,
-    n_per_person_grid = as.integer(round(10^seq(2, 5, by = 0.25))),
+    n_per_person_fixed = 200000L,
+    n_per_person_grid = as.integer(round(10^seq(4, 8, by = 0.25))),
     taus_fixed = list(AE = 0.02, ARE = 0.5),
     taus = list(AE = NULL, ARE = NULL),
     tau_grid_points = 200L,
-    tau_grid_prob = 0.999,
+    tau_grid_prob = 0.99,
     target = 0.95,
     seed = 260926L
   )
@@ -117,7 +119,8 @@ run_simulation_dm_errorchoice <- function(config = simulation_dm_errorchoice_def
     n_people = config$n_people,
     concentration = config$concentration,
     n_per_person = n_values,
-    seed = config$seed
+    seed = config$seed,
+    success_rule = success_rule_id()
   )
   result_file <- simulation_result_path(
     config = sim_config,

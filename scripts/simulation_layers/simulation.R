@@ -677,11 +677,12 @@ run_replicates <- function(p, n = NULL, B,
 #' Simulate replicates at one sample size and derive per-replicate success.
 #'
 #' Both sampling models share a single success rule, `replicate_success()`: for each metric in `config$taus`, the
-#' error is averaged over persons per (replicate, cell type), and the largest of these per-cell-type means must be
-#' `<= tau`; a replicate succeeds jointly only if it succeeds for every metric in `config$taus`.
+#' estimated proportions are averaged over persons per (replicate, cell type), the error of that pooled estimate
+#' against the population proportion is computed, and the largest of these per-cell-type errors must be `<= tau`; a
+#' replicate succeeds jointly only if it succeeds for every metric in `config$taus`.
 #'
-#' The multinomial model has no person structure, so its per-cell-type errors (one draw per replicate) are treated
-#' as a single synthetic person (`person_id = 1`) before being handed to `replicate_success()` — averaging over one
+#' The multinomial model has no person structure, so its observed proportions (one draw per replicate) are treated
+#' as a single synthetic person (`person_id = 1`) before being handed to `replicate_success()` — pooling over one
 #' person is a no-op, so this reduces to "every cell-type error <= tau" for that model, matching its previous
 #' behaviour. The Dirichlet-multinomial model's `person_results` (one row per replicate, person, cell type, metric)
 #' is passed to `replicate_success()` directly.
@@ -768,26 +769,25 @@ simulate_success_at_n <- function(alpha, n = NULL, config, seed = config$seed) {
     seed       = seed
   )
 
-  # rep_out$errors is a B x K x M array (dimnames list(NULL, 1..K, metrics)); flatten it into a long data.frame
-  # with a single synthetic person_id = 1 per replicate so replicate_success() (which expects one row per
-  # replicate/person/cell_type/metric) can be reused for the multinomial model too. expand.grid()'s default
-  # variation order (first argument fastest) matches the array's column-major storage order (dim 1 fastest, then
-  # dim 2, then dim 3), so `error = as.vector(rep_out$errors)` lines up exactly with `grid`.
-  errors_dim <- dim(rep_out$errors)
-  metrics    <- dimnames(rep_out$errors)[[3L]]
+  # rep_out$phat is a B x K matrix; flatten it into a long data.frame with a single synthetic person_id = 1 per
+  # replicate (one row per replicate/cell_type/metric) so replicate_success() can be reused for the multinomial
+  # model too. Pooling over one person is a no-op, so the rule reduces to the per-draw error against p.
+  B       <- nrow(rep_out$phat)
+  metrics <- config$metrics
   grid <- expand.grid(
-    replicate = seq_len(errors_dim[[1L]]),
-    cell_type = seq_len(errors_dim[[2L]]),
+    replicate = seq_len(B),
+    cell_type = seq_along(p),
     metric    = metrics,
     KEEP.OUT.ATTRS   = FALSE,
     stringsAsFactors = FALSE
   )
   person_results <- data.frame(
-    replicate = grid$replicate,
-    person_id = 1L,
-    cell_type = grid$cell_type,
-    metric    = grid$metric,
-    error     = as.vector(rep_out$errors),
+    replicate                  = grid$replicate,
+    person_id                  = 1L,
+    cell_type                  = grid$cell_type,
+    metric                     = grid$metric,
+    observed_proportion        = rep_out$phat[cbind(grid$replicate, grid$cell_type)],
+    population_mean_proportion = p[grid$cell_type],
     stringsAsFactors = FALSE
   )
 
