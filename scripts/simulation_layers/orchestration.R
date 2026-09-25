@@ -76,38 +76,51 @@ run_sample_size_experiment <- function(
   cache_dir = here::here("results", "simresults"),
   simulate = simulate_success_at_n
 ) {
-  alphas <- validate_positive_numeric(config$alpha, "config$alpha", allow_vector = TRUE)
+  alphas <- validate_positive_numeric(
+    config$alpha,
+    "config$alpha",
+    allow_vector = TRUE
+  )
   n_init <- validate_positive_numeric(config$n_init, "config$n_init")
 
-  n_alpha          <- length(alphas)
+  n_alpha <- length(alphas)
   sample_size_rows <- vector("list", n_alpha)
-  diag_list        <- vector("list", n_alpha)
+  diag_list <- vector("list", n_alpha)
 
   for (i in seq_len(n_alpha)) {
-    alpha_i        <- alphas[[i]]
-    alpha_config   <- config
-    alpha_config$alpha  <- alpha_i
+    alpha_i <- alphas[[i]]
+    alpha_config <- config
+    alpha_config$alpha <- alpha_i
     alpha_config$n_init <- n_init
-    result_file    <- simulation_result_path(alpha_config, cache_dir, "sample_size")
+    result_file <- simulation_result_path(
+      alpha_config,
+      cache_dir,
+      "sample_size"
+    )
 
     if (cache && !force_recompute && file.exists(result_file)) {
       alpha_result <- readRDS(result_file)
     } else {
-      alpha_result <- estimate_sample_size(alpha_i, n_init, alpha_config, simulate = simulate)
+      alpha_result <- estimate_sample_size(
+        alpha_i,
+        n_init,
+        alpha_config,
+        simulate = simulate
+      )
       if (cache) {
         saveRDS(alpha_result, result_file)
       }
     }
 
     sample_size_rows[[i]] <- data.frame(
-      alpha           = alpha_i,
-      sample_size     = as.integer(alpha_result$final_n),
+      alpha = alpha_i,
+      sample_size = as.integer(alpha_result$final_n),
       stopping_reason = alpha_result$stopping_reason,
       iterations_used = alpha_result$iterations_used,
       stringsAsFactors = FALSE
     )
     diag_list[[i]] <- alpha_result$diagnostics
-    n_init         <- alpha_result$final_n
+    n_init <- alpha_result$final_n
   }
 
   list(
