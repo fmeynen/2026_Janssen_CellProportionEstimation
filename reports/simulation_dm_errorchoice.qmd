@@ -1,0 +1,351 @@
+---
+title: "Dirichlet-Multinomial Error-Choice Simulation"
+date: "2026-09-28"
+format:
+  pdf:
+    documentclass: article
+    papersize: a4
+    toc: false
+    number-sections: true
+    fig-pos: "H"
+    fig-width: 9
+    fig-height: 5.5
+    geometry:
+      - margin=2.5cm
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r}
+#| label: setup
+#| include: false
+
+source(here::here("scripts", "simulations", "simulation_dm_errorchoice.R"))
+
+config <- simulation_dm_errorchoice_defaults()
+result <- suppressMessages(run_simulation_dm_errorchoice(config))
+
+c_conc <- config$concentration
+K <- config$K
+tau_AE <- config$taus_fixed$AE
+tau_ARE <- config$taus_fixed$ARE
+n_fixed <- config$n_per_person_fixed
+n_grid <- config$n_per_person_grid
+N_max <- max(config$n_people)
+alpha_max <- max(config$alpha)
+
+p_mat <- as.matrix(result$p_table[, paste0("index_", seq_len(K))])
+rownames(p_mat) <- result$p_table$alpha
+
+# Analytic variance components of (pbar_j - p_j), see @eq-var-total.
+var_people <- function(p, N, c) p * (1 - p) / (N * (c + 1))
+var_count <- function(p, N, n, c) p * (1 - p) * c / ((c + 1) * N * n)
+sd_total <- function(p, N, n, c) sqrt(var_people(p, N, c) + var_count(p, N, n, c))
+technical_share <- function(n, c) c / (c + n)
+
+fmt <- function(x, digits = 3) formatC(x, digits = digits, format = "fg", big.mark = ",")
+pct <- function(x, digits = 1) paste0(formatC(100 * x, digits = digits, format = "f"), "%")
+sci <- function(x) {
+  e <- floor(log10(x))
+  m <- x / 10^e
+  if (isTRUE(all.equal(m, 1))) sprintf("$10^{%d}$", e) else sprintf("$%s \\cdot 10^{%d}$", fmt(m, 2), e)
+}
+
+success_at <- function(curves, metric, alpha, n_people) {
+  curves$success_rate[curves$metric == metric & curves$alpha == alpha & curves$n_people == n_people]
+}
+
+success_n <- function(curves, metric, alpha, n_people, n) {
+  rows <- curves[curves$metric == metric & curves$alpha == alpha & curves$n_people == n_people, ]
+  rows$success_rate[which.min(abs(log(rows$n_per_person) - log(n)))]
+}
+
+# Grid value closest to n = c.
+n_c <- n_grid[which.min(abs(log(n_grid) - log(c_conc)))]
+
+stats_fixed <- result$stats[result$stats$n_per_person == n_fixed, ]
+```
+
+# Overview {#sec-overview}
+
+This report evaluates **dirichlet-multinomial** sampling error across cell-type proportions generated from a weighted Beta(α, 1) distribution.
+
+## Success rule {#sec-success-rule}
+
+For each replicate and cell type $j$, the estimated proportions are averaged over the $N$ people in that replicate. The average is compared with the population-level true proportion $p_j$:
+
+$$
+\bar p_j = \frac{1}{N}\sum_{i=1}^{N} \hat p_{ij}, \qquad
+AE_j = |\bar p_j - p_j|, \qquad
+ARE_j = \frac{|\bar p_j - p_j|}{p_j}.
+$$ {#eq-errors}
+
+A replicate **succeeds** for AE if $\max AE_j \le \tau_{AE}$, and for ARE if $\max ARE_j \le \tau_{ARE}$. AE and ARE are always evaluated separately and never combined into one criterion.
+
+# Simulation setup {#sec-setup}
+
+The data are generated in two steps (a Dirichlet-multinomial hierarchy):
+
+1. Person $i$ has a true composition $\theta_i \sim \text{Dirichlet}(c \cdot p)$, where $p$ is the population mean composition and $c$ is the **concentration**.
+2. From that person, $n$ cells are sampled: $\text{counts}_i \sim \text{Multinomial}(n, \theta_i)$, so $\hat p_{ij} = \text{count}_{ij} / n$.
+
+The population proportions $p$ are fixed values derived from a Beta distribution (@tbl-p). A larger $\alpha$ makes the composition more skewed, so the rarest types become rarer. Each scenario $(\alpha, N, n)$ is simulated $B$ times. @tbl-setup lists all settings.
+
+\newpage
+
+```{r}
+#| label: tbl-setup
+#| tbl-cap: "Simulation settings (`simulation_dm_errorchoice_defaults()`)."
+
+setup_table <- data.frame(
+  Parameter = c(
+    "alpha (Beta shape)", "K (cell types)", "B (replicates per scenario)", "Concentration c",
+    "N (people per replicate)", "n per person, sweep", "n per person, threshold sweep",
+    "tau_AE (fixed)", "tau_ARE (fixed)", "Target success rate", "Seed"
+  ),
+  Value = c(
+    paste(config$alpha, collapse = ", "),
+    K,
+    format(config$B, big.mark = ","),
+    c_conc,
+    paste(config$n_people, collapse = ", "),
+    sprintf("%s to %s (%d log-spaced values)",
+            format(min(n_grid), big.mark = ",", scientific = FALSE),
+            format(max(n_grid), big.mark = ",", scientific = FALSE),
+            length(n_grid)),
+    format(n_fixed, big.mark = ",", scientific = FALSE),
+    tau_AE,
+    tau_ARE,
+    config$target,
+    config$seed
+  )
+)
+knitr::kable(setup_table, booktabs = TRUE)
+```
+
+```{r}
+#| label: tbl-p
+#| tbl-cap: "Population mean proportions $p_j$ per cell type (columns) for each $\\alpha$ (rows)."
+
+p_print <- p_mat
+colnames(p_print) <- seq_len(K)
+p_print <- formatC(p_print, digits = 2, format = "g")
+rownames(p_print) <- NULL
+knitr::kable(
+  data.frame(alpha = rownames(p_mat), p_print, check.names = FALSE),
+  booktabs = TRUE,
+  align = "r"
+)
+```
+
+
+## Concentration $c$ {#sec-concentration}
+
+The **concentration $c$** controls the **biological variation** between people. The individual proportion $\theta_{ij}$ comes from a $Dirichlet(N, c \cdot p_j)$ such that:
+
+$$
+E(\theta_{ij}) = p_j, \qquad \operatorname{Var}(\theta_{ij}) = \frac{p_j(1-p_j)}{c+1}.
+$$ {#eq-var-theta}
+
+So $c$ acts as a precision parameter:
+
+- **Small $c$:** people differ a lot. $\operatorname{Var}(\theta_{ij})$ comes close to its maximum $p_j(1-p_j)$.
+- **Large $c$:** everybody is close to $p$. As $c \to \infty$, the model reduces to a plain multinomial with no differences between people.
+
+Conversely, if the between-person variance of a cell type is known from real data, $c = p_j(1-p_j)/\operatorname{Var}(\theta_{ij}) - 1$.
+
+@tbl-theta shows how large this variation is on the proportion scale, through the standard deviation $\text{SD}(\theta_{ij})$ and the coefficient of variation $\text{CV} = \text{SD}(\theta_{ij}) / p_j = \sqrt{(1-p_j)/(p_j(c+1))}$.
+
+```{r}
+#| label: tbl-theta
+#| tbl-cap: "Between-person variability of the individual proportions: SD($\\theta_{ij}$) with the coefficient of variation CV = SD / $p_j$ in brackets, for several concentrations $c$ (columns) and population proportions $p_j$ (rows)."
+
+c_values <- c(1e3, 1e4, 1e5, 1e6)
+p_values <- c(0.01, 0.05, 0.1, 0.4)
+theta_tab <- outer(p_values, c_values, function(p, c) {
+  sd_theta <- sqrt(p * (1 - p) / (c + 1))
+  sprintf("%s (%s)", formatC(sd_theta, digits = 2, format = "fg"), formatC(sd_theta / p, digits = 2, format = "fg"))
+})
+theta_tab <- data.frame(paste0("p = ", p_values), theta_tab)
+names(theta_tab) <- c("", paste0("c = ", format(c_values, big.mark = ",", scientific = FALSE)))
+knitr::kable(theta_tab, booktabs = TRUE, align = c("l", rep("r", length(c_values))))
+```
+
+```{r}
+#| label: theta-example
+p_ex <- 0.1
+q_ex <- qbeta(c(0.025, 0.975), c_conc * p_ex, c_conc * (1 - p_ex))
+p_rare <- 0.01
+q_rare <- qbeta(c(0.025, 0.975), c_conc * p_rare, c_conc * (1 - p_rare))
+p_min_all <- min(p_mat)
+```
+
+At the simulated concentration $c = `r format(c_conc, big.mark = ",", scientific = FALSE)`$, a cell type with a population mean of `r pct(p_ex, 0)` has a between-person SD of `r fmt(sqrt(p_ex * (1 - p_ex) / (c_conc + 1)), 2)`, so 95% of people have between `r pct(q_ex[1])` and `r pct(q_ex[2])` of that type. For rare types the *relative* spread is larger. For $p_j = `r p_rare`$ (CV `r fmt(sqrt((1 - p_rare) / (p_rare * (c_conc + 1))), 2)`), 95% of people have between `r pct(q_rare[1], 2)` and `r pct(q_rare[2], 2)`. Only for the very rarest types, where $c\,p_j \ll 1$ (down to $c\,p_j \approx `r fmt(c_conc * p_min_all, 2)`$ at $\alpha = `r alpha_max`$), is the distribution of $\theta_{ij}$ heavily skewed. There, almost everyone has essentially none of that cell type, and a few people have a lot.
+
+::: {.callout-important}
+## $c = `r format(c_conc, big.mark = ",", scientific = FALSE)`$ is an assumption
+
+This value is taken as a more realistic level of between-person variability than strongly heterogeneous choices such as $c = 50$. It still has to be confirmed with an estimate from real per-person data. All results below depend on $c$.
+:::
+
+# Simulation results {#sec-results}
+
+## Success rate versus threshold
+
+@fig-tau-ae and @fig-tau-are show the success rate as a function of the threshold $\tau$ at a fixed `r format(n_fixed, big.mark = ",", scientific = FALSE)` cells per person.
+
+```{r}
+#| label: fig-tau-ae
+#| fig-cap: !expr 'sprintf("AE success rate versus threshold $\\tau_{AE}$ at %s cells per person. One panel per $\\alpha$, one colour per number of people $N$; the dashed line marks the %s%% target.", format(n_fixed, big.mark = ",", scientific = FALSE), 100 * config$target)'
+#| fig-alt: "Four panels, one per alpha, showing the AE success rate vs the threshold."
+
+plot_success_vs_tau(
+  result$curves_tau, "AE",
+  subtitle = sprintf("n_per_person = %s, concentration = %s", n_fixed, c_conc),
+  target = config$target
+)
+```
+
+```{r}
+#| label: fig-tau-are
+#| fig-cap: !expr 'sprintf("ARE success rate versus threshold $\\tau_{ARE}$ at %s cells per person. Note the jump at $\\tau_{ARE} = 1$.", format(n_fixed, big.mark = ",", scientific = FALSE))'
+#| fig-alt: "Four panels, one per alpha, showing the ARE success rate versus threshold."
+
+plot_success_vs_tau(
+  result$curves_tau, "ARE",
+  subtitle = sprintf("n_per_person = %s, concentration = %s", n_fixed, c_conc),
+  target = config$target
+)
+```
+
+## Success rate versus cells per person
+
+@fig-n-ae and @fig-n-are fix the threshold ($\tau_{AE} = `r tau_AE`$, $\tau_{ARE} = `r tau_ARE`$) and vary the number of cells per person.
+
+```{r}
+#| label: fig-n-ae
+#| fig-cap: !expr 'sprintf("AE success rate versus cells per person (log scale) at $\\tau_{AE} = %s$. Success rises with cells per person and levels off from roughly $n \\approx c$ onwards.", tau_AE)'
+#| fig-alt: "Four panels, one per alpha, showing AE success rate versus cells per person from 10 squared to 10 to the 8 on a log scale. Each curve rises and then levels off at a plateau; curves for more people lie higher and reach their plateau closer to 1."
+
+plot_success_vs_n(
+  result$curves_n, "AE",
+  subtitle = sprintf("tau_AE = %s, concentration = %s", tau_AE, c_conc),
+  target = config$target
+)
+```
+
+```{r}
+#| label: fig-n-are
+#| fig-cap: !expr 'sprintf("ARE success rate versus cells per person (log scale) at $\\tau_{ARE} = %s$.", tau_ARE)'
+#| fig-alt: "Four panels, one per alpha, showing ARE success rate versus cells per person on a log scale. For small alpha the curves rise with cells per person and level off; for the largest alpha values success stays low at every number of cells, because of the very rare cell types."
+
+plot_success_vs_n(
+  result$curves_n, "ARE",
+  subtitle = sprintf("tau_ARE = %s, concentration = %s", tau_ARE, c_conc),
+  target = config$target
+)
+```
+
+For AE, the success rate increases with the number of cells per person, but only up to a point. At $\alpha = `r alpha_max`$ with a single person, it rises from `r pct(success_n(result$curves_n, "AE", alpha_max, 1, min(n_grid)), 0)` at `r sci(min(n_grid))` cells to `r pct(success_n(result$curves_n, "AE", alpha_max, 1, n_c), 0)` at $n \approx c$, and ends at `r pct(success_n(result$curves_n, "AE", alpha_max, 1, max(n_grid)), 0)` at `r sci(max(n_grid))` cells. With `r N_max` people the same curve ends at `r pct(success_n(result$curves_n, "AE", alpha_max, N_max, max(n_grid)), 0)`. Beyond roughly `r sci(10 * c_conc)` cells per person, extra cells hardly help, and only more people raise the plateau (@sec-why-level).
+
+For ARE the picture depends on $\alpha$. At $\alpha = `r min(config$alpha)`$ with a single person, success rises from `r pct(success_n(result$curves_n, "ARE", min(config$alpha), 1, min(n_grid)), 0)` to `r pct(success_n(result$curves_n, "ARE", min(config$alpha), 1, max(n_grid)), 0)`. At $\alpha = `r alpha_max`$ it ends at only `r pct(success_n(result$curves_n, "ARE", alpha_max, 1, max(n_grid)), 0)` (1 person) and `r pct(success_n(result$curves_n, "ARE", alpha_max, N_max, max(n_grid)), 0)` (`r N_max` people). The rarest cell types have $c\,p_j \ll 1$, so in most replicates none of the people carry them. Then $\bar p_j = 0$ and $ARE_j = 1 > \tau_{ARE}$, however many cells are counted. At small $n$ the same happens through counting: a rare type that people do carry is often simply not observed. The irregular, non-monotone parts of the curves for $\alpha = 3$ and $4$ (around $10^3$ to $10^4$ cells) come from this discreteness. When the expected count of a rare type per person is of order one, $\hat p_{ij}$ can only take a few values, and whether $ARE_j \le \tau_{ARE}$ jumps with $n$.
+
+# Why the curves level off {#sec-why-level}
+
+## Error sources
+
+Given the two-step generation in @sec-setup, the error of $\bar p_j$ has two parts:
+
+- **Differences between people (biological variation).** Each $\theta_{ij}$ scatters around $p_j$ with variance $p_j(1-p_j)/(c+1)$ (@eq-var-theta).
+- **Sampling (technical variation).** Given the person, each $\hat p_{ij}$ scatters around $\theta_{ij}$ with variance $\theta_{ij}(1-\theta_{ij})/n$. On average over people, this is $E[\theta_{ij}(1-\theta_{ij})]/n = \dfrac{p_j(1-p_j)\,c}{(c+1)\,n}$.
+
+Assuming people are independent, averaging over $N$ of them gives
+
+$$
+\operatorname{Var}(\bar p_j - p_j) = p_j(1-p_j)\left[\underbrace{\frac{1}{N(c+1)}}_{\text{biological}} + \underbrace{\frac{c}{(c+1)\,N n}}_{\text{technical}}\right].
+$$ {#eq-var-total}
+
+- The **biological term** depends only on the number of people $N$ and the concentration $c$.
+- The **technical term** depends only on the **total** number of cells counted, $N \cdot n$.
+
+The ratio of technical to biological variance is $c/n$. So technical variation makes up a share $c/(c+n)$ of the variance:
+
+- For $n \ll c$, technical variation dominates, and more cells per person clearly improve the estimate. This is the rising part of @fig-n-ae and @fig-n-are.
+- At $n = c = `r format(c_conc, big.mark = ",", scientific = FALSE)`$ the two parts are equal.
+- At $n =$ `r sci(10 * c_conc)` the technical share is only `r pct(technical_share(10 * c_conc, c_conc), 0)`. From there on, the SD of $\bar p_j$ is within `r pct(sqrt(1 + c_conc / (10 * c_conc)) - 1, 0)` of its floor, and the curves level off.
+- Even with infinitely many cells per person, $\bar p_j$ converges to the average composition of *those particular* $N$ people, and not to $p_j$. The biological term stays, and only more people lower the plateau.
+
+
+## Illustration with Additional Simulation {#sec-theory-vs-sim}
+
+The main simulation only stores the worst-case error per replicate. To illustrate @eq-var-total directly per cell type, the report runs a small extra simulation. For $\alpha = `r alpha_max`$ it draws $\theta_{ij} \sim \text{Beta}(c\,p_j, c(1-p_j))$ (the exact marginal of the Dirichlet) and $\text{count}_{ij} \sim \text{Binomial}(n, \theta_{ij})$ (the exact marginal of the multinomial). This is done for the most abundant cell type and for a rare one (the rarest type with $c\,p_j \geq 0.25$; for the very rarest types a Monte Carlo SD is too noisy to compare with theory), with $N \in \{1, `r N_max`\}$ and $n$ from $10^1$ to `r sci(max(n_grid))`.
+
+```{r}
+#| label: overlay-sim
+
+overlay_B <- 20000L
+overlay_n <- as.integer(round(10^seq(1, 8, by = 0.25)))
+p_alpha <- p_mat[as.character(alpha_max), ]
+# Most abundant type, plus the rarest type with c * p_j >= 0.25. For the very rarest types (c * p_j << 1) the variance
+# comes from extremely rare large theta draws, so a Monte Carlo SD estimate is too noisy to compare with theory.
+rare_ok <- which(c_conc * p_alpha >= 0.25)
+overlay_types <- c(which.max(p_alpha), rare_ok[which.min(p_alpha[rare_ok])])
+overlay_N <- c(1L, as.integer(N_max))
+
+overlay_rmse <- function(p_j, N, n_values, c, B, seed) {
+  set.seed(seed)
+  theta <- rbeta(B * N, c * p_j, c * (1 - p_j))
+  vapply(n_values, function(n) {
+    counts <- matrix(rbinom(B * N, n, theta), nrow = B, ncol = N)
+    pbar <- rowMeans(counts) / n
+    sqrt(mean((pbar - p_j)^2))
+  }, numeric(1))
+}
+
+overlay <- do.call(rbind, lapply(overlay_types, function(j) {
+  do.call(rbind, lapply(overlay_N, function(N) {
+    data.frame(
+      cell_type = sprintf("cell type %d (p = %s)", j, formatC(p_alpha[[j]], digits = 2, format = "g")),
+      N = N,
+      n = overlay_n,
+      simulated = overlay_rmse(p_alpha[[j]], N, overlay_n, c_conc, overlay_B, seed = config$seed + j * 100 + N),
+      theory = sd_total(p_alpha[[j]], N, overlay_n, c_conc),
+      floor = sqrt(var_people(p_alpha[[j]], N, c_conc))
+    )
+  }))
+}))
+overlay$cell_type <- factor(overlay$cell_type, levels = unique(overlay$cell_type))
+```
+
+```{r}
+#| label: fig-overlay
+#| fig-cap: !expr 'sprintf("Standard deviation of $\\bar p_j - p_j$ versus cells per person (both axes log scale) at $\\alpha = %s$, $c = %s$. Points: simulated (%s replicates). Lines: @eq-var-total.", alpha_max, format(c_conc, big.mark = ",", scientific = FALSE), format(overlay_B, big.mark = ","))'
+#| fig-alt: "Two panels, one for the most abundant and one for a rare cell type, with the standard deviation of the pooled estimate on a log scale versus cells per person on a log scale. Simulated points follow the theoretical curves, which decrease up to around ten thousand cells per person and then flatten. The curve for ten people lies below the one for one person."
+#| fig-height: 4.5
+
+ggplot2::ggplot(overlay, ggplot2::aes(x = n, colour = factor(N))) +
+  ggplot2::geom_line(ggplot2::aes(y = theory)) +
+  ggplot2::geom_point(ggplot2::aes(y = simulated), size = 1.3) +
+  ggplot2::facet_wrap(~cell_type, scales = "free_y") +
+  ggplot2::scale_x_log10() +
+  ggplot2::scale_y_log10() +
+  ggplot2::scale_color_viridis_d(end = 0.85) +
+  ggplot2::labs(
+    x = "Cells per person (n, log scale)",
+    y = "SD of pooled estimate error (log scale)",
+    colour = "N (people)"
+  ) +
+  ggplot2::theme_bw()
+```
+
+```{r}
+#| label: overlay-check
+overlay_rel_dev <- abs(overlay$simulated / overlay$theory - 1)
+rare_label <- levels(overlay$cell_type)[2]
+max_dev_common <- max(overlay_rel_dev[overlay$cell_type != rare_label])
+max_dev_rare <- max(overlay_rel_dev[overlay$cell_type == rare_label])
+```
+
+@fig-overlay confirms the decomposition. The SD falls with $n$ up to about $n \approx c$ and then flattens, and above roughly `r sci(10 * c_conc)` cells adding cells no longer helps. The simulated SD stays within `r pct(max_dev_common)` of the formula for the most abundant type, and within `r pct(max_dev_rare)` for the rare type ($c\,p_j \approx `r fmt(c_conc * p_alpha[[overlay_types[2]]], 2)`$).

@@ -20,7 +20,8 @@ for (m in c("AE", "ARE")) {
       "n_per_person = %s, concentration = %s",
       config$n_per_person_fixed,
       config$concentration
-    )
+    ),
+    target = config$target
   ))
   print(plot_success_vs_n(
     result$curves_n,
