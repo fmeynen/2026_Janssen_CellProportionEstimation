@@ -318,15 +318,16 @@ run_dirichlet_multinomial_experiment <- function(
       "population_mean_proportion",
       "error"
     )]
-    p_table_list[[i]] <- data.frame(
-      scenario_id = scenario$scenario_id[[1L]],
-      alpha = scenario$alpha[[1L]],
-      p_max = scenario$p_max[[1L]],
-      n_people = scenario$n_people[[1L]],
-      concentration = scenario$concentration[[1L]],
-      as.list(stats::setNames(as.numeric(p), paste0("index_", seq_len(K)))),
-      stringsAsFactors = FALSE,
-      check.names = FALSE
+    p_table_list[[i]] <- extract_p_table_row(
+      scenario$alpha[[1L]],
+      scenario$p_max[[1L]],
+      p,
+      K,
+      before = list(scenario_id = scenario$scenario_id[[1L]]),
+      after = list(
+        n_people = scenario$n_people[[1L]],
+        concentration = scenario$concentration[[1L]]
+      )
     )
     keep[[i]] <- TRUE
   }

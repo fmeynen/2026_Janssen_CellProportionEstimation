@@ -60,15 +60,20 @@ summarize_argmax <- function(argmax, p) {
 #' @param p_max_i  Numeric scalar (or NA); the p_max value for this scenario.
 #' @param p        Numeric vector of length K; true proportions for this scenario.
 #' @param K        Integer; number of cell types.
+#' @param before   Optional named list of extra columns placed before `alpha`.
+#' @param after    Optional named list of extra columns placed between `p_max` and `index_1`.
 #'
-#' @return A single-row data.frame with columns: alpha, p_max, index_1, ..., index_K.
-extract_p_table_row <- function(alpha_i, p_max_i, p, K) {
-  data.frame(
-    alpha = alpha_i,
-    p_max = p_max_i,
-    as.list(stats::setNames(as.numeric(p), paste0("index_", seq_len(K)))),
-    stringsAsFactors = FALSE,
-    check.names = FALSE
+#' @return A single-row data.frame with columns: [before], alpha, p_max, [after], index_1, ..., index_K.
+extract_p_table_row <- function(alpha_i, p_max_i, p, K, before = NULL, after = NULL) {
+  do.call(
+    data.frame,
+    c(
+      before,
+      list(alpha = alpha_i, p_max = p_max_i),
+      after,
+      as.list(stats::setNames(as.numeric(p), paste0("index_", seq_len(K)))),
+      list(stringsAsFactors = FALSE, check.names = FALSE)
+    )
   )
 }
 
