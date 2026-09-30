@@ -13,11 +13,7 @@
 #' @return A ggplot object. For Beta proportions, facets are by alpha.
 #'    For fixed-max Beta proportions,facets are by p_max (rows) and alpha (columns).
 plot_proportions_curve <- function(result) {
-  stopifnot(
-    "result must be a list" = is.list(result),
-    "result must contain inputs" = "inputs" %in% names(result),
-    "result must contain p_table" = "p_table" %in% names(result)
-  )
+  validate_result_fields(result, c("inputs", "p_table"))
   if (!("proportion_method" %in% names(result$inputs))) {
     stop("result$inputs must contain proportion_method.", call. = FALSE)
   }
@@ -136,7 +132,7 @@ plot_proportions_curve <- function(result) {
 #' @return A ggplot object.
 plot_success_rate_curve <- function(result, metric = NULL, alphas = NULL,
                                     p_maxs = NULL, target = 0.95) {
-  stopifnot(is.list(result), "curves" %in% names(result))
+  validate_result_fields(result, "curves")
   df <- result$curves
   if (!is.null(metric)) {
     df <- df[df$metric %in% metric, , drop = FALSE]
@@ -193,10 +189,7 @@ plot_success_rate_curve <- function(result, metric = NULL, alphas = NULL,
 #'
 #' @return A ggplot object.
 plot_argmax_histogram <- function(result, metric, alphas = NULL, p_maxs = NULL) {
-  stopifnot(
-    "result must be a list" = is.list(result),
-    "result must contain replicate_summaries" = "replicate_summaries" %in% names(result)
-  )
+  validate_result_fields(result, "replicate_summaries")
   df <- result$replicate_summaries
   metric_is_scalar_character <- is.character(metric) && length(metric) == 1L && !is.na(metric)
   metric_is_supported <- metric_is_scalar_character && metric %in% c("AE", "ARE", "TSE", "LAE")

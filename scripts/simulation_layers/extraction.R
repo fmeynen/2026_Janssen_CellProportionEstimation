@@ -34,7 +34,7 @@ max_error_summary <- function(error_vec, tie_method = c("random", "first", "last
 #'
 #' @return Tidy data.frame with columns: metric, index, count, fraction, p_value.
 summarize_argmax <- function(argmax, p) {
-  stopifnot(is.matrix(argmax), !is.null(colnames(argmax)))
+  validate_named_matrix(argmax, "argmax")
   K <- length(p)
   metrics <- colnames(argmax)
   rows <- vector("list", length(metrics))

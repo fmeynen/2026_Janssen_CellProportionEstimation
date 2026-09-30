@@ -573,7 +573,7 @@ run_simulation_experiment <- function(
   concentration = NULL,
   ...
 ) {
-  stopifnot(is.numeric(alpha), length(alpha) >= 1L, all(alpha > 0))
+  validate_positive_numeric(alpha, "alpha", allow_vector = TRUE)
   model <- match.arg(model, c("multinomial", "dirichlet_multinomial"))
 
   if (identical(model, "dirichlet_multinomial")) {

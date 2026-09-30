@@ -16,8 +16,10 @@
 #' Unscaled weights: w = dbeta(grid, shape1 = alpha, shape2 = 1). The default grid avoids 0 and 1 so that all weights —
 #' and therefore all proportions — are strictly positive.
 generate_proportions_beta <- function(alpha, K = 10, grid = default_beta_grid(K)) {
-  stopifnot(is.numeric(alpha), length(alpha) == 1L, alpha > 0)
-  stopifnot(length(grid) == K)
+  validate_positive_numeric(alpha, "alpha")
+  if (length(grid) != K) {
+    stop("grid must have length K.", call. = FALSE)
+  }
   w <- dbeta(grid, shape1 = alpha, shape2 = 1)
   p <- normalize_to_simplex(w)
   validate_proportions(p)
@@ -197,35 +199,13 @@ generate_proportions <- function(alpha, K = 10,
 #'
 #' @return Integer vector of length K summing to n.
 simulate_counts_multinomial <- function(p, n) {
-  stopifnot(is.numeric(p), all(p >= 0), abs(sum(p) - 1) < 1e-10)
-  stopifnot(is.numeric(n), length(n) == 1L, n >= 1L)
+  if (!is.numeric(p) || !isTRUE(all(p >= 0)) || !(abs(sum(p) - 1) < 1e-10)) {
+    stop("p must be a nonnegative numeric vector summing to 1.", call. = FALSE)
+  }
+  if (!is.numeric(n) || length(n) != 1L || !(n >= 1L)) {
+    stop("n must be a single number >= 1.", call. = FALSE)
+  }
   as.integer(rmultinom(1L, size = n, prob = p))
-}
-
-validate_positive_integer <- function(x, name, allow_vector = FALSE) {
-  valid_length <- if (allow_vector) length(x) >= 1L else length(x) == 1L
-  if (!is.numeric(x) || !valid_length || any(!is.finite(x)) || any(x < 1L) || any(x %% 1 != 0)) {
-    expected <- if (allow_vector) {
-      "a non-empty vector of positive integers"
-    } else {
-      "a positive integer"
-    }
-    stop(sprintf("%s must be %s.", name, expected), call. = FALSE)
-  }
-  as.integer(x)
-}
-
-validate_positive_numeric <- function(x, name, allow_vector = FALSE) {
-  valid_length <- if (allow_vector) length(x) >= 1L else length(x) == 1L
-  if (!is.numeric(x) || !valid_length || any(!is.finite(x)) || any(x <= 0)) {
-    expected <- if (allow_vector) {
-      "a non-empty vector of positive finite numbers"
-    } else {
-      "a single positive finite number"
-    }
-    stop(sprintf("%s must be %s.", name, expected), call. = FALSE)
-  }
-  as.numeric(x)
 }
 
 #' Draw one composition from a Dirichlet distribution.
@@ -327,7 +307,8 @@ simulate_counts <- function(p, n = NULL,
       concentration = concentration
     ),
     logistic_normal_multinomial = stop(
-      "model = 'logistic_normal_multinomial' is not yet implemented."
+      "model = 'logistic_normal_multinomial' is not yet implemented.",
+      call. = FALSE
     )
   )
 }
@@ -342,7 +323,12 @@ simulate_counts <- function(p, n = NULL,
 #'
 #' @return Numeric vector of observed proportions summing to 1.
 counts_to_proportions <- function(y, n = sum(y)) {
-  stopifnot(is.numeric(y) || is.integer(y), n > 0)
+  if (!is.numeric(y)) {
+    stop("y must be numeric.", call. = FALSE)
+  }
+  if (!isTRUE(all(n > 0))) {
+    stop("n must be > 0.", call. = FALSE)
+  }
   y / n
 }
 
@@ -363,7 +349,9 @@ counts_to_proportions <- function(y, n = sum(y)) {
 #' TSE = asinh(sqrt(2 * n^2 * (phat - p)^2))  (requires n)
 #' LAE = log(abs(phat - p))
 compute_errors <- function(phat, p, metrics = c("AE", "ARE"), n = NULL) {
-  stopifnot(length(phat) == length(p))
+  if (length(phat) != length(p)) {
+    stop("phat and p must have the same length.", call. = FALSE)
+  }
   if ("TSE" %in% metrics && is.null(n)) {
     stop("n must be provided when metric 'TSE' is requested.", call. = FALSE)
   }
@@ -694,7 +682,12 @@ run_replicates <- function(p, n = NULL, B,
     stop("n must be provided for model = 'multinomial'.", call. = FALSE)
   }
   K <- length(p)
-  stopifnot(K >= 1L, B >= 1L)
+  if (K < 1L) {
+    stop("p must have length >= 1.", call. = FALSE)
+  }
+  if (!(B >= 1L)) {
+    stop("B must be >= 1.", call. = FALSE)
+  }
 
   max_errors <- matrix(NA_real_,    nrow = B, ncol = length(metrics),
                        dimnames = list(NULL, metrics))
