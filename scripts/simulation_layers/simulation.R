@@ -801,7 +801,8 @@ simulate_success_at_n <- function(alpha, n = NULL, config, seed = config$seed) {
   p <- generate_proportions(
     alpha  = alpha,
     K      = config$K,
-    method = config$proportion_method
+    method = config$proportion_method,
+    p_max  = config$p_max
   )
 
   missing_tau_msg <- paste0(

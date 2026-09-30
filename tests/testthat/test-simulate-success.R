@@ -135,3 +135,16 @@ test_that("a metric without a tau is skipped with a warning and does not affect 
 test_that("the old required_person_fraction / per-person success rule has been removed", {
   expect_false(exists("validate_required_person_fraction"))
 })
+
+test_that("config$p_max is passed to generate_proportions() for proportion_method = 'fixed_max_beta'", {
+  fixed_config <- dm_config
+  fixed_config$proportion_method <- "fixed_max_beta"
+  fixed_config$p_max <- 0.4
+
+  res <- simulate_success_at_n(alpha = 1, n = 10L, config = fixed_config, seed = 42)
+
+  expect_gte(res$success_rate, 0)
+  expect_lte(res$success_rate, 1)
+  # The true proportions used are exposed as population_mean_proportion; the largest must be exactly p_max.
+  expect_equal(max(res$rep_out$person_results$population_mean_proportion), fixed_config$p_max)
+})
