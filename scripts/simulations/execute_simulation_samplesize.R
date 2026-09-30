@@ -16,13 +16,7 @@
 # ---------------------------------------------------------------------------
 
 #+ echo=TRUE, results='hide'
-simulation_helper_files <- list.files(here::here(
-  "scripts",
-  "simulation_layers"
-))
-lapply(simulation_helper_files, function(f) {
-  source(here::here("scripts", "simulation_layers", f))
-})
+source(here::here("scripts", "load_layers.R"))
 library(ggplot2)
 
 # Setup config file -----------------------------------------------------------------------------------------------
