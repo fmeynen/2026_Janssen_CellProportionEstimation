@@ -90,8 +90,8 @@ simulation_dm_errorchoice_defaults <- function() {
 #' @return List with elements:
 #'   \describe{
 #'     \item{inputs}{`config`, as passed in.}
-#'     \item{p_table}{From `run_dm_errorchoice_experiment()`: one row per alpha, columns `alpha`, `index_1`, ...,
-#'       `index_K`.}
+#'     \item{p_table}{From `run_dm_errorchoice_experiment()`: one row per alpha, columns `alpha`, `cell_type_1`, ...,
+#'       `cell_type_K`.}
 #'     \item{stats}{From `run_dm_errorchoice_experiment()`: one row per (alpha, n_people, n_per_person, metric,
 #'       replicate).}
 #'     \item{curves_tau}{Data.frame: `alpha`, `n_people`, `metric`, `tau`, `success_rate`, at

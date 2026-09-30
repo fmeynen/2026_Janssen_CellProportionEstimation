@@ -37,7 +37,7 @@ generate_proportions_beta <- function(alpha, K = 10, grid = default_beta_grid(K)
 #' @return If `length(p_max) == 1`, a numeric vector of length K, all strictly positive, summing to 1, with a strictly
 #'         unique largest value at index K.
 #'         If `length(p_max) > 1`, a numeric matrix with one row per `p_max` value and K columns
-#'         (`index_1`, ..., `index_K`).
+#'         (`cell_type_1`, ..., `cell_type_K`).
 #'
 #' @details
 #' The first `K - 1` proportions are built from Beta(alpha, 1) weights, normalized and then rescaled to sum to
@@ -65,7 +65,7 @@ generate_props_fixed_max_beta <- function(alpha, K = 10, p_max,
       },
       FUN.VALUE = numeric(K)
     ))
-    colnames(p_mat) <- paste0("index_", seq_len(K))
+    colnames(p_mat) <- paste0("cell_type_", seq_len(K))
     rownames(p_mat) <- paste0("p_max_", seq_along(p_max), "_", format(p_max, trim = TRUE))
     return(p_mat)
   }
@@ -98,7 +98,7 @@ generate_props_fixed_max_beta <- function(alpha, K = 10, p_max,
 #' @return If `length(p_min) == 1`, a numeric vector of length K, all strictly positive, summing to 1, with a smallest
 #'         value at index 1 (ties with other indices allowed).
 #'         If `length(p_min) > 1`, a numeric matrix with one row per `p_min` value and K columns
-#'         (`index_1`, ..., `index_K`).
+#'         (`cell_type_1`, ..., `cell_type_K`).
 #'
 #' @details
 #' The last `K - 1` proportions are built from Beta(alpha, 1) weights, normalized and then rescaled to sum to
@@ -131,7 +131,7 @@ generate_props_fixed_min_beta <- function(alpha, K = 10, p_min,
       },
       FUN.VALUE = numeric(K)
     ))
-    colnames(p_mat) <- paste0("index_", seq_len(K))
+    colnames(p_mat) <- paste0("cell_type_", seq_len(K))
     rownames(p_mat) <- paste0("p_min_", seq_along(p_min), "_", format(p_min, trim = TRUE))
     return(p_mat)
   }

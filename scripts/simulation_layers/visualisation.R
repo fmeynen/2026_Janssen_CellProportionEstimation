@@ -22,9 +22,9 @@ plot_proportions_curve <- function(result) {
   if (!is.data.frame(p_table) || nrow(p_table) == 0L) {
     stop("result$p_table must be a non-empty data.frame.", call. = FALSE)
   }
-  index_cols <- grep("^index_", names(p_table), value = TRUE)
-  if (length(index_cols) == 0L) {
-    stop("result$p_table must contain index_1 ... index_K columns.", call. = FALSE)
+  cell_type_cols <- grep("^cell_type_", names(p_table), value = TRUE)
+  if (length(cell_type_cols) == 0L) {
+    stop("result$p_table must contain cell_type_1 ... cell_type_K columns.", call. = FALSE)
   }
   if (!("alpha" %in% names(p_table))) {
     stop("result$p_table must contain an alpha column.", call. = FALSE)
@@ -35,7 +35,7 @@ plot_proportions_curve <- function(result) {
     stop("Unsupported proportion_method in result$inputs.", call. = FALSE)
   }
 
-  K <- length(index_cols)
+  K <- length(cell_type_cols)
   n_rows <- nrow(p_table)
   curve_rows <- vector("list", n_rows)
   point_rows <- vector("list", n_rows)
@@ -46,7 +46,7 @@ plot_proportions_curve <- function(result) {
 
   for (i in seq_len(n_rows)) {
     alpha_i <- as.numeric(p_table$alpha[[i]])
-    p_i <- as.numeric(p_table[i, index_cols, drop = FALSE])
+    p_i <- as.numeric(p_table[i, cell_type_cols, drop = FALSE])
     p_max_i <- if ("p_max" %in% names(p_table)) as.numeric(p_table$p_max[[i]]) else NA_real_
 
     if (identical(method, "beta")) {

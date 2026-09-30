@@ -36,7 +36,7 @@ n_grid <- config$n_per_person_grid
 N_max <- max(config$n_people)
 alpha_max <- max(config$alpha)
 
-p_mat <- as.matrix(result$p_table[, paste0("index_", seq_len(K))])
+p_mat <- as.matrix(result$p_table[, paste0("cell_type_", seq_len(K))])
 rownames(p_mat) <- result$p_table$alpha
 
 # Analytic variance components of (pbar_j - p_j), see @eq-var-total.

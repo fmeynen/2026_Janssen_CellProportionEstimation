@@ -44,7 +44,7 @@ simulation_result_path <- function(config, dir, name) {
 
 # Schema version of cached results. Bump this whenever the shape of a cached result changes (columns, list elements,
 # types), so that stale files on disk are never read back as if they had the new shape.
-CACHE_SCHEMA <- 1L
+CACHE_SCHEMA <- 2L
 
 
 #' Return a cached result, or compute it and cache it.
@@ -391,7 +391,7 @@ run_dirichlet_multinomial_experiment <- function(
 #'   \describe{
 #'     \item{inputs}{All input arguments (`alpha`, `K`, `B`, `metrics`, `proportion_method`, `n_people`,
 #'       `n_per_person`, `concentration`, `seed`).}
-#'     \item{p_table}{Data.frame with one row per alpha and columns `alpha`, `index_1`, ..., `index_K`.}
+#'     \item{p_table}{Data.frame with one row per alpha and columns `alpha`, `cell_type_1`, ..., `cell_type_K`.}
 #'     \item{stats}{Data.frame with one row per (alpha, n_people, n_per_person, metric, replicate) and columns
 #'       `alpha`, `n_people`, `concentration`, `n_per_person`, `metric`, `replicate`, `stat`.}
 #'   }
@@ -484,7 +484,7 @@ run_dm_errorchoice_experiment <- function(
   p_table_list <- lapply(seq_along(alpha), function(i) {
     data.frame(
       alpha = alpha[[i]],
-      as.list(stats::setNames(as.numeric(p_list[[i]]), paste0("index_", seq_len(K)))),
+      as.list(stats::setNames(as.numeric(p_list[[i]]), paste0("cell_type_", seq_len(K)))),
       stringsAsFactors = FALSE,
       check.names = FALSE
     )
@@ -543,18 +543,18 @@ run_dm_errorchoice_experiment <- function(
 #'   \describe{
 #'     \item{inputs}{All input arguments.}
 #'     \item{p_table}{Data.frame with one row per simulated alpha/p_max combination,
-#'       an `alpha` column, a `p_max` column, and one column per index
-#'       (`index_1`, ..., `index_K`) containing the corresponding p values.}
+#'       an `alpha` column, a `p_max` column, and one column per cell type
+#'       (`cell_type_1`, ..., `cell_type_K`) containing the corresponding p values.}
 #'     \item{replicate_summaries}{Tidy data.frame:
 #'       alpha, p_max, replicate, metric, max_error, argmax_index.}
 #'     \item{errors_long}{Tidy data.frame:
-#'       alpha, p_max, replicate, metric, index, error.}
+#'       alpha, p_max, replicate, metric, cell_type, error.}
 #'     \item{phat_long}{Tidy data.frame:
-#'       alpha, p_max, replicate, index, phat.}
+#'       alpha, p_max, replicate, cell_type, phat.}
 #'     \item{curves}{Tidy data.frame:
 #'       alpha, p_max, metric, tau, success_rate, mean_n_above.}
 #'     \item{argmax_summary}{Tidy data.frame:
-#'       alpha, p_max, metric, index, count, fraction, p_value.}
+#'       alpha, p_max, metric, cell_type, count, fraction, p_value.}
 #'   }
 run_simulation_experiment <- function(
   alpha,
@@ -669,7 +669,7 @@ run_simulation_experiment <- function(
       "alpha",
       "p_max",
       "metric",
-      "index",
+      "cell_type",
       "count",
       "fraction",
       "p_value"
