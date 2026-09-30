@@ -38,9 +38,6 @@ simulation_sample_size_defaults <- function(n_init = 200000) {
     n_people = 2,
     concentration = 50,
     model = "dirichlet_multinomial",
-    # `n_init` (and, at solve time, `n`) then means cells sampled per person, not total cells.
-    n_people = NULL,
-    concentration = NULL,
     tie_method = "random",
     proportion_method = "beta",
     seed = 260925L,
