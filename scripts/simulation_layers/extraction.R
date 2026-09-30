@@ -188,16 +188,7 @@ success_rule_id <- function() {
 #' @return Data.frame with one row per (scenario_id, replicate), sorted by scenario_id then replicate, with
 #'   columns scenario_id, replicate, stat (max over cell types of the pooled-proportion error).
 replicate_pooled_error <- function(person_results, metric) {
-  required_cols <- c("replicate", "cell_type", "metric", "observed_proportion", "population_mean_proportion")
-  if (!is.data.frame(person_results) || !all(required_cols %in% names(person_results))) {
-    stop(
-      paste(
-        "person_results must be a data.frame with columns replicate, cell_type, metric, observed_proportion,",
-        "population_mean_proportion."
-      ),
-      call. = FALSE
-    )
-  }
+  validate_required_columns(person_results, person_results_required_cols)
   if (!is.character(metric) || length(metric) != 1L || is.na(metric)) {
     stop("metric must be a single character string.", call. = FALSE)
   }
@@ -299,16 +290,7 @@ replicate_pooled_error <- function(person_results, metric) {
 #'   scenario_id, replicate, `pass_<metric>` for each metric used, and `pass` (logical AND across all `pass_<metric>`
 #'   columns).
 replicate_success <- function(person_results, taus) {
-  required_cols <- c("replicate", "cell_type", "metric", "observed_proportion", "population_mean_proportion")
-  if (!is.data.frame(person_results) || !all(required_cols %in% names(person_results))) {
-    stop(
-      paste(
-        "person_results must be a data.frame with columns replicate, cell_type, metric, observed_proportion,",
-        "population_mean_proportion."
-      ),
-      call. = FALSE
-    )
-  }
+  validate_required_columns(person_results, person_results_required_cols)
   if (!is.list(taus) || is.null(names(taus)) || any(names(taus) == "")) {
     stop("taus must be a named list with one scalar threshold per metric.", call. = FALSE)
   }

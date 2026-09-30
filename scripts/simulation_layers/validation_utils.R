@@ -94,3 +94,28 @@ fail_fixed_min_beta_impossible <- function(non_min, alpha, K, p_min) {
     class = c("impossible_fixed_min_error", "error", "condition")
   ))
 }
+
+#' Columns every `person_results` data.frame must contain for extraction.
+person_results_required_cols <- c(
+  "replicate", "cell_type", "metric", "observed_proportion", "population_mean_proportion"
+)
+
+#' Validate that `df` is a data.frame containing all `required` columns.
+#'
+#' Stops (with `call. = FALSE`) naming the missing columns.
+validate_required_columns <- function(df, required, arg = "person_results") {
+  if (!is.data.frame(df)) {
+    stop(sprintf("%s must be a data.frame.", arg), call. = FALSE)
+  }
+  missing_cols <- setdiff(required, names(df))
+  if (length(missing_cols) > 0L) {
+    stop(
+      sprintf(
+        "%s must be a data.frame with columns %s; missing: %s.",
+        arg, paste(required, collapse = ", "), paste(missing_cols, collapse = ", ")
+      ),
+      call. = FALSE
+    )
+  }
+  invisible(df)
+}
