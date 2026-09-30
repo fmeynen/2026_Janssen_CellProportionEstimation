@@ -79,6 +79,66 @@ evaluate_thresholds <- function(max_errors, taus, errors = NULL) {
 }
 
 
+# Success Rate From Stat Vector --------------------------------------------------------------------------------------
+
+#' Compute success rate at each threshold from a per-replicate statistic.
+#'
+#' A replicate succeeds at threshold `tau` iff `stat <= tau`. Vectorised over `taus`. `stat` may contain `Inf` (e.g.
+#' relative error when a true proportion is 0), which never counts as a success at any finite `tau`.
+#'
+#' @param stat Numeric vector (length >= 1, no `NA`) of per-replicate values, e.g. the per-replicate max-over-cell-
+#'   types error.
+#' @param taus Numeric vector (no `NA`) of threshold values.
+#'
+#' @return Numeric vector, same length as `taus`, giving `mean(stat <= tau)` for each `tau`. Unnamed.
+success_rate_from_stat <- function(stat, taus) {
+  if (!is.numeric(stat) || length(stat) < 1L || anyNA(stat)) {
+    stop("`stat` must be a numeric vector of length >= 1 with no NA values.", call. = FALSE)
+  }
+  if (!is.numeric(taus) || anyNA(taus)) {
+    stop("`taus` must be a numeric vector with no NA values.", call. = FALSE)
+  }
+  unname(vapply(taus, function(t) mean(stat <= t), numeric(1L)))
+}
+
+
+#' Build a data-driven grid of thresholds for plotting success rate vs tau.
+#'
+#' The grid spans `[0, upper]` where `upper` is the `prob`-quantile of `stat`. If that quantile is not finite (e.g.
+#' `stat` contains `Inf` at high `prob`), it is recomputed using only the finite values of `stat`.
+#'
+#' @param stat     Numeric vector (length >= 1, no `NA`) of per-replicate values; may contain `Inf`.
+#' @param n_points Number of grid points (positive integer, >= 2). Default 200.
+#' @param prob     Quantile probability in `(0, 1]` used to set the grid's upper end. Default 0.999.
+#'
+#' @return Numeric vector of length `n_points`, `seq(0, upper, length.out = n_points)`.
+default_tau_grid <- function(stat, n_points = 200, prob = 0.999) {
+  if (!is.numeric(stat) || length(stat) < 1L || anyNA(stat)) {
+    stop("`stat` must be a numeric vector of length >= 1 with no NA values.", call. = FALSE)
+  }
+  n_points <- validate_positive_integer(n_points, "n_points")
+  if (n_points < 2L) {
+    stop("`n_points` must be >= 2.", call. = FALSE)
+  }
+  if (!is.numeric(prob) || length(prob) != 1L || !is.finite(prob) || prob <= 0 || prob > 1) {
+    stop("`prob` must be a single number in (0, 1].", call. = FALSE)
+  }
+
+  upper <- stats::quantile(stat, probs = prob, names = FALSE, na.rm = TRUE)
+  if (!is.finite(upper)) {
+    finite_stat <- stat[is.finite(stat)]
+    if (length(finite_stat) == 0L) {
+      stop("`stat` has no finite values; cannot build a tau grid.", call. = FALSE)
+    }
+    upper <- stats::quantile(finite_stat, probs = prob, names = FALSE, na.rm = TRUE)
+  }
+  if (!is.finite(upper) || upper <= 0) {
+    stop("Computed an invalid (non-finite or non-positive) upper bound for the tau grid.", call. = FALSE)
+  }
+  seq(0, upper, length.out = n_points)
+}
+
+
 # Sample-Size Estimation --------------------------------------------------------------------------------------
 
 #' Pilot sample sizes around a centre on a multiplicative grid.

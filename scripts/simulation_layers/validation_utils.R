@@ -63,3 +63,34 @@ fail_fixed_max_beta_impossible <- function(non_max, alpha, K, p_max) {
     class = c("impossible_fixed_max_error", "error", "condition")
   ))
 }
+
+fixed_min_beta_impossible_error <- paste(
+  "method = 'fixed_min_beta' failed because the fixed smallest proportion is not the minimum."
+)
+
+#' Warn and fail when fixed-min Beta proportions cannot keep p_min as the minimum.
+#'
+#' An impossible combination is defined exactly as follows: after constructing
+#' the Beta-shaped remainder and scaling it to sum to `1 - p_min`, at least one
+#' non-min component is `< p_min` (up to a small tolerance), so the fixed
+#' smallest component is no longer the minimum. Ties with `p_min` are allowed.
+fail_fixed_min_beta_impossible <- function(non_min, alpha, K, p_min) {
+  warning(
+    sprintf(
+      paste(
+        "Impossible fixed_min_beta combination for alpha=%s, K=%s, p_min=%s:",
+        "after scaling the Beta-shaped remainder to sum to 1 - p_min,",
+        "at least one non-min component is < p_min (min non-min = %s)."
+      ),
+      format(alpha, trim = TRUE),
+      K,
+      format(p_min, trim = TRUE),
+      format(min(non_min), trim = TRUE)
+    ),
+    call. = FALSE
+  )
+  stop(structure(
+    list(message = fixed_min_beta_impossible_error, call = NULL),
+    class = c("impossible_fixed_min_error", "error", "condition")
+  ))
+}

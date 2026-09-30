@@ -115,6 +115,78 @@ if (!grepl("not strictly unique", err_fixed_max)) {
 }
 pass("fixed_max_beta fails after warning on impossible combinations")
 
+err_missing_pmin <- tryCatch(
+  generate_proportions(alpha = 2, K = fixed_K, method = "fixed_min_beta"),
+  error = function(e) e$message
+)
+if (!grepl("p_min must be provided", err_missing_pmin)) {
+  stop("fixed_min_beta should require p_min")
+}
+pass("fixed_min_beta requires p_min")
+
+p_fixed_min <- generate_proportions(alpha = 2, K = fixed_K, method = "fixed_min_beta", p_min = 0.01)
+if (!identical(p_fixed_min, generate_props_fixed_min_beta(alpha = 2, K = fixed_K, p_min = 0.01))) {
+  stop("fixed_min_beta dispatcher route should match generate_props_fixed_min_beta")
+}
+pass("fixed_min_beta dispatcher route works")
+
+if (abs(sum(p_fixed_min) - 1) > 1e-12) stop("fixed_min_beta proportions do not sum to 1")
+pass("fixed_min_beta proportions sum to 1")
+
+if (length(p_fixed_min) != fixed_K) stop("fixed_min_beta returned wrong length")
+pass("fixed_min_beta returns length K")
+
+if (abs(p_fixed_min[1L] - 0.01) > 1e-12) stop("fixed_min_beta should place p_min at lowest index")
+pass("fixed_min_beta fixes smallest proportion at lowest index")
+
+if (any(p_fixed_min[-1L] < p_fixed_min[1L])) stop("fixed_min_beta p_min should be the minimum")
+pass("fixed_min_beta p_min is the minimum")
+
+# alpha = 1 gives a uniform remainder, so p_min = 1/K ties with every other component
+p_fixed_min_tie <- generate_proportions(alpha = 1, K = fixed_K, method = "fixed_min_beta", p_min = 1 / fixed_K)
+if (any(abs(p_fixed_min_tie - 1 / fixed_K) > 1e-12)) {
+  stop("fixed_min_beta should allow ties with p_min")
+}
+pass("fixed_min_beta allows ties with p_min")
+
+p_fixed_min_multi <- generate_props_fixed_min_beta(alpha = 2, K = fixed_K, p_min = c(0.005, 0.01))
+if (!is.matrix(p_fixed_min_multi) || nrow(p_fixed_min_multi) != 2L || ncol(p_fixed_min_multi) != fixed_K) {
+  stop("fixed_min_beta should return a matrix for vector p_min")
+}
+pass("fixed_min_beta returns a matrix for vector p_min")
+if (any(abs(rowSums(p_fixed_min_multi) - 1) > 1e-12)) {
+  stop("fixed_min_beta vector p_min rows should sum to 1")
+}
+pass("fixed_min_beta vector p_min rows sum to 1")
+if (any(abs(p_fixed_min_multi[, 1L] - c(0.005, 0.01)) > 1e-12)) {
+  stop("fixed_min_beta vector p_min should place each p_min at lowest index")
+}
+if (!all(apply(p_fixed_min_multi, 1, function(row) all(row[-1L] >= row[1L])))) {
+  stop("fixed_min_beta vector p_min should keep p_min as the minimum")
+}
+pass("fixed_min_beta vector p_min keeps p_min at lowest index as the minimum")
+
+warn_fixed_min <- NULL
+err_fixed_min <- tryCatch(
+  withCallingHandlers(
+    generate_proportions(alpha = 2, K = fixed_K, method = "fixed_min_beta", p_min = 0.3),
+    warning = function(w) {
+      warn_fixed_min <<- conditionMessage(w)
+      invokeRestart("muffleWarning")
+    }
+  ),
+  error = function(e) e
+)
+if (is.null(warn_fixed_min) || !grepl("Impossible fixed_min_beta combination", warn_fixed_min)) {
+  stop("fixed_min_beta should warn on impossible alpha/K/p_min combinations")
+}
+pass("fixed_min_beta warns on impossible combinations")
+
+if (!inherits(err_fixed_min, "impossible_fixed_min_error")) {
+  stop("fixed_min_beta should fail with impossible_fixed_min_error after warning")
+}
+pass("fixed_min_beta fails with classed error after warning on impossible combinations")
+
 # ---- 3. simulate_counts_multinomial ----------------------------------------
 cat("\n3. simulate_counts_multinomial\n")
 
