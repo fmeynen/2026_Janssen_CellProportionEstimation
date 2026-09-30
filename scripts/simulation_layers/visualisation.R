@@ -130,7 +130,8 @@ plot_proportions_curve <- function(result) {
 #' @param metric  Character scalar. If NULL, plot all metrics (faceted).
 #' @param alphas  Optional numeric vector; subset of alpha values to plot.
 #' @param p_maxs  Optional numeric vector; subset of p_max values to plot.
-#' @param target  Success-rate reference line drawn as a horizontal dotted line (default 0.95).
+#' @param target  Success-rate reference line drawn as a horizontal dotted line (default 0.95);
+#'   `NULL` hides the line.
 #'
 #' @return A ggplot object.
 plot_success_rate_curve <- function(result, metric = NULL, alphas = NULL,
@@ -164,7 +165,6 @@ plot_success_rate_curve <- function(result, metric = NULL, alphas = NULL,
 
   p <- ggplot2::ggplot(df, aes_mapping) +
     ggplot2::geom_line() +
-    ggplot2::geom_hline(yintercept = target, linetype = "dotted") +
     ggplot2::labs(
       x     = "Threshold (tau)",
       y     = "Success rate",
@@ -172,6 +172,9 @@ plot_success_rate_curve <- function(result, metric = NULL, alphas = NULL,
       title = "Success-rate curve(s)"
     ) +
     ggplot2::theme_bw()
+  if (!is.null(target)) {
+    p <- p + ggplot2::geom_hline(yintercept = target, linetype = "dotted")
+  }
   if (has_p_max) {
     p <- p + ggplot2::labs(linetype = "p_max")
   }
@@ -238,10 +241,20 @@ plot_argmax_histogram <- function(result, metric, alphas = NULL, p_maxs = NULL) 
   argmax_plot
 }
 
-plot_success_rate_vs_n <- function(result, target = NULL, smooth = FALSE) {
+#' Plot success rate against sample size.
+#'
+#' @param result  Output list with a `curves` data.frame, or such a data.frame directly (columns
+#'   `alpha`, `n`, `success_rate`).
+#' @param target  Success-rate reference line drawn as a horizontal dotted line (default 0.95). If
+#'   not supplied and `result$inputs$success_rate_target` exists, that value is used. Pass `NULL`
+#'   to hide the line.
+#' @param smooth  Logical; draw a smoothed curve instead of a line.
+#'
+#' @return A ggplot object.
+plot_success_rate_vs_n <- function(result, target = 0.95, smooth = FALSE) {
   if (is.list(result) && "curves" %in% names(result)) {
     df <- result$curves
-    if (is.null(target) && "inputs" %in% names(result) && "success_rate_target" %in% names(result$inputs)) {
+    if (missing(target) && "inputs" %in% names(result) && "success_rate_target" %in% names(result$inputs)) {
       target <- result$inputs$success_rate_target
     }
   } else {
@@ -298,11 +311,11 @@ plot_success_rate_vs_n <- function(result, target = NULL, smooth = FALSE) {
 #'   `"ARE"`).
 #' @param subtitle   Optional character scalar; passed through to `labs()`
 #'   (e.g. to state the fixed `n_per_person`).
-#' @param target     Optional numeric scalar; if supplied, draws a dashed
-#'   horizontal reference line at this success rate.
+#' @param target     Numeric scalar (default `0.95`); if non-`NULL`, draws a
+#'   dotted horizontal reference line at this success rate.
 #'
 #' @return A ggplot object.
-plot_success_vs_tau <- function(curves_tau, metric, subtitle = NULL, target = NULL) {
+plot_success_vs_tau <- function(curves_tau, metric, subtitle = NULL, target = 0.95) {
   if (!is.data.frame(curves_tau)) {
     stop("curves_tau must be a data.frame.", call. = FALSE)
   }
@@ -347,7 +360,7 @@ plot_success_vs_tau <- function(curves_tau, metric, subtitle = NULL, target = NU
     ggplot2::theme_bw()
 
   if (!is.null(target)) {
-    p <- p + ggplot2::geom_hline(yintercept = target, linetype = "dashed")
+    p <- p + ggplot2::geom_hline(yintercept = target, linetype = "dotted")
   }
 
   p
@@ -366,7 +379,7 @@ plot_success_vs_tau <- function(curves_tau, metric, subtitle = NULL, target = NU
 #' @param subtitle  Optional character scalar; passed through to `labs()`
 #'   (e.g. to state the fixed `tau`).
 #' @param target    Numeric scalar (default `0.95`); if non-`NULL`, draws a
-#'   dashed horizontal reference line at this success rate.
+#'   dotted horizontal reference line at this success rate.
 #'
 #' @return A ggplot object.
 plot_success_vs_n <- function(curves_n, metric, subtitle = NULL, target = 0.95) {
@@ -415,7 +428,7 @@ plot_success_vs_n <- function(curves_n, metric, subtitle = NULL, target = 0.95) 
     ggplot2::theme_bw()
 
   if (!is.null(target)) {
-    p <- p + ggplot2::geom_hline(yintercept = target, linetype = "dashed")
+    p <- p + ggplot2::geom_hline(yintercept = target, linetype = "dotted")
   }
 
   p

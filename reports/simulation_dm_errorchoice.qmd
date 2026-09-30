@@ -193,7 +193,7 @@ At the simulated concentration $c = `r format(c_conc, big.mark = ",", scientific
 
 ```{r}
 #| label: fig-tau-ae
-#| fig-cap: !expr 'sprintf("AE success rate versus threshold $\\tau_{AE}$ at %s cells per person. One panel per $\\alpha$, one colour per number of people $N$; the dashed line marks the %s%% target.", format(n_fixed, big.mark = ",", scientific = FALSE), 100 * config$target)'
+#| fig-cap: !expr 'sprintf("AE success rate versus threshold $\\tau_{AE}$ at %s cells per person. One panel per $\\alpha$, one colour per number of people $N$; the dotted line marks the %s%% target.", format(n_fixed, big.mark = ",", scientific = FALSE), 100 * config$target)'
 #| fig-alt: "Four panels, one per alpha, showing the AE success rate vs the threshold."
 
 plot_success_vs_tau(

@@ -72,3 +72,62 @@ test_that("plot_argmax_histogram facets with alpha in columns and p_max in rows"
   expect_equal(length(unique(layout$COL)), length(unique(res$replicate_summaries$alpha)))
   expect_equal(length(unique(layout$ROW)), length(unique(res$replicate_summaries$p_max)))
 })
+
+# Success-plot target lines: consistent default (0.95) and dotted linetype ---------------------------
+
+hline_layers <- function(p) {
+  Filter(function(l) inherits(l$geom, "GeomHline"), p$layers)
+}
+
+expect_dotted_target <- function(p, yintercept) {
+  layers <- hline_layers(p)
+  expect_length(layers, 1L)
+  expect_equal(layers[[1]]$data$yintercept, yintercept)
+  expect_equal(layers[[1]]$aes_params$linetype, "dotted")
+}
+
+curves_vs_n_df <- function() {
+  data.frame(alpha = 2, n = c(10, 20, 30), success_rate = c(0.5, 0.8, 0.96))
+}
+
+curves_tau_df <- function() {
+  data.frame(
+    alpha = 2, n_people = 1L, metric = "AE",
+    tau = c(0.05, 0.1, 0.2), success_rate = c(0.5, 0.8, 0.96)
+  )
+}
+
+curves_n_df <- function() {
+  data.frame(
+    alpha = 2, n_people = 1L, n_per_person = c(10, 100, 1000), metric = "AE",
+    tau = 0.1, success_rate = c(0.5, 0.8, 0.96)
+  )
+}
+
+test_that("plot_success_rate_curve draws a dotted 0.95 target by default and hides it for NULL", {
+  res <- plot_res_beta()
+  expect_dotted_target(plot_success_rate_curve(res, metric = "AE"), 0.95)
+  expect_length(hline_layers(plot_success_rate_curve(res, metric = "AE", target = NULL)), 0L)
+})
+
+test_that("plot_success_rate_vs_n draws a dotted 0.95 target by default and hides it for NULL", {
+  expect_dotted_target(plot_success_rate_vs_n(curves_vs_n_df()), 0.95)
+  expect_length(hline_layers(plot_success_rate_vs_n(curves_vs_n_df(), target = NULL)), 0L)
+})
+
+test_that("plot_success_rate_vs_n uses inputs$success_rate_target only when target is not supplied", {
+  res <- list(curves = curves_vs_n_df(), inputs = list(success_rate_target = 0.9))
+  expect_dotted_target(plot_success_rate_vs_n(res), 0.9)
+  expect_dotted_target(plot_success_rate_vs_n(res, target = 0.8), 0.8)
+  expect_length(hline_layers(plot_success_rate_vs_n(res, target = NULL)), 0L)
+})
+
+test_that("plot_success_vs_tau draws a dotted 0.95 target by default and hides it for NULL", {
+  expect_dotted_target(plot_success_vs_tau(curves_tau_df(), "AE"), 0.95)
+  expect_length(hline_layers(plot_success_vs_tau(curves_tau_df(), "AE", target = NULL)), 0L)
+})
+
+test_that("plot_success_vs_n draws a dotted 0.95 target by default and hides it for NULL", {
+  expect_dotted_target(plot_success_vs_n(curves_n_df(), "AE"), 0.95)
+  expect_length(hline_layers(plot_success_vs_n(curves_n_df(), "AE", target = NULL)), 0L)
+})
