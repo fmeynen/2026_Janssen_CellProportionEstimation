@@ -41,6 +41,42 @@ simulation_result_path <- function(config, dir, name) {
   file.path(dir, paste0(name, "_", hash_config(config), ".rds"))
 }
 
+
+# Schema version of cached results. Bump this whenever the shape of a cached result changes (columns, list elements,
+# types), so that stale files on disk are never read back as if they had the new shape.
+CACHE_SCHEMA <- 1L
+
+
+#' Return a cached result, or compute it and cache it.
+#'
+#' The cache file is `simulation_result_path(c(key, list(cache_schema = CACHE_SCHEMA)), dir, name)`. Callers should
+#' pass only the fields that influence the computed result in `key`, so that e.g. plotting-only settings never
+#' trigger a recomputation.
+#'
+#' @param key             Named list of the simulation-relevant inputs that identify the result.
+#' @param name            Short label prefixed to the file name (e.g. `"errorchoice"`).
+#' @param compute         Zero-argument function returning the result to cache.
+#' @param cache           Logical; read/write the `.rds` cache file under `dir`. If `FALSE`, always computes and
+#'   never touches the disk.
+#' @param force_recompute Logical; ignore an existing cache file and recompute (still writes the new result when
+#'   `cache` is `TRUE`).
+#' @param dir             Directory holding the cache files. Created automatically if it does not yet exist.
+#'
+#' @return The cached or freshly computed result.
+cached_result <- function(key, name, compute, cache = TRUE, force_recompute = FALSE, dir) {
+  result_file <- simulation_result_path(c(key, list(cache_schema = CACHE_SCHEMA)), dir, name)
+
+  if (cache && !force_recompute && file.exists(result_file)) {
+    return(readRDS(result_file))
+  }
+
+  result <- compute()
+  if (cache) {
+    saveRDS(result, result_file)
+  }
+  result
+}
+
 #' Run the sample-size solver over a grid of alphas with warm start and per-alpha caching.
 #'
 #' For each alpha in `config$alpha`, in the given order, runs `estimate_sample_size()` to find the smallest sample
@@ -92,25 +128,39 @@ run_sample_size_experiment <- function(
     alpha_config <- config
     alpha_config$alpha <- alpha_i
     alpha_config$n_init <- n_init
-    result_file <- simulation_result_path(
-      c(alpha_config, list(success_rule = success_rule_id())),
-      cache_dir,
-      "sample_size"
+    # Only the fields read by estimate_sample_size() / simulate_success_at_n() go into the cache key.
+    key <- list(
+      alpha = alpha_i,
+      n_init = n_init,
+      success_rate_target = config$success_rate_target,
+      rel_tol = config$rel_tol,
+      max_iterations = config$max_iterations,
+      f0 = config$f0,
+      f_floor = config$f_floor,
+      n_max = config$n_max,
+      B = config$B,
+      seed = config$seed,
+      K = config$K,
+      taus = config$taus,
+      metrics = config$metrics,
+      model = config$model,
+      tie_method = config$tie_method,
+      proportion_method = config$proportion_method,
+      p_max = config$p_max,
+      n_people = config$n_people,
+      concentration = config$concentration,
+      success_rule = success_rule_id()
     )
-
-    if (cache && !force_recompute && file.exists(result_file)) {
-      alpha_result <- readRDS(result_file)
-    } else {
-      alpha_result <- estimate_sample_size(
-        alpha_i,
-        n_init,
-        alpha_config,
-        simulate = simulate
-      )
-      if (cache) {
-        saveRDS(alpha_result, result_file)
-      }
-    }
+    alpha_result <- cached_result(
+      key = key,
+      name = "sample_size",
+      compute = function() {
+        estimate_sample_size(alpha_i, n_init, alpha_config, simulate = simulate)
+      },
+      cache = cache,
+      force_recompute = force_recompute,
+      dir = cache_dir
+    )
 
     sample_size_rows[[i]] <- data.frame(
       alpha = alpha_i,

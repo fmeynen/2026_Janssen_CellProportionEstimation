@@ -119,30 +119,26 @@ run_simulation_dm_errorchoice <- function(config = simulation_dm_errorchoice_def
     seed = config$seed,
     success_rule = success_rule_id()
   )
-  result_file <- simulation_result_path(
-    config = sim_config,
-    dir    = cache_dir,
-    name   = "dm_errorchoice"
+  sim_result <- cached_result(
+    key = sim_config,
+    name = "dm_errorchoice",
+    compute = function() {
+      run_dm_errorchoice_experiment(
+        alpha = config$alpha,
+        K = config$K,
+        B = config$B,
+        metrics = config$metrics,
+        proportion_method = config$proportion_method,
+        n_people = config$n_people,
+        n_per_person = n_values,
+        concentration = config$concentration,
+        seed = config$seed
+      )
+    },
+    cache = cache,
+    force_recompute = force_recompute,
+    dir = cache_dir
   )
-
-  if (cache && !force_recompute && file.exists(result_file)) {
-    sim_result <- readRDS(result_file)
-  } else {
-    sim_result <- run_dm_errorchoice_experiment(
-      alpha = config$alpha,
-      K = config$K,
-      B = config$B,
-      metrics = config$metrics,
-      proportion_method = config$proportion_method,
-      n_people = config$n_people,
-      n_per_person = n_values,
-      concentration = config$concentration,
-      seed = config$seed
-    )
-    if (cache) {
-      saveRDS(sim_result, result_file)
-    }
-  }
 
   stats <- sim_result$stats
 

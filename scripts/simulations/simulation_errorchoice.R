@@ -48,17 +48,10 @@ run_simulation_errorchoice <- function(config = simulation_errorchoice_defaults(
                                        cache = TRUE,
                                        force_recompute = FALSE,
                                        cache_dir = here::here("results", "simresults")) {
-  result_file <- simulation_result_path(
-    config = config,
-    dir    = cache_dir,
-    name   = "errorchoice"
-  )
-
-  if (cache && !force_recompute && file.exists(result_file)) {
-    return(readRDS(result_file))
-  }
-
-  result <- run_simulation_experiment(
+  # Only fields consumed by run_simulation_experiment() go into the cache key. taus stays in: the returned `curves`
+  # are evaluated at those thresholds inside the experiment. Any other config field (e.g. plot-only settings) does not
+  # trigger re-simulation.
+  key <- list(
     alpha = config$alpha,
     K = config$K,
     n = config$n,
@@ -72,12 +65,33 @@ run_simulation_errorchoice <- function(config = simulation_errorchoice_defaults(
     tie_method = config$tie_method,
     proportion_method = config$proportion_method,
     p_max = config$p_max,
-    seed = config$seed
+    seed = config$seed,
+    success_rule = success_rule_id()
   )
 
-  if (cache) {
-    saveRDS(result, result_file)
-  }
-
-  result
+  cached_result(
+    key = key,
+    name = "errorchoice",
+    compute = function() {
+      run_simulation_experiment(
+        alpha = config$alpha,
+        K = config$K,
+        n = config$n,
+        B = config$B,
+        taus = config$taus,
+        metrics = config$metrics,
+        model = config$model,
+        n_people = config$n_people,
+        n_per_person = config$n_per_person,
+        concentration = config$concentration,
+        tie_method = config$tie_method,
+        proportion_method = config$proportion_method,
+        p_max = config$p_max,
+        seed = config$seed
+      )
+    },
+    cache = cache,
+    force_recompute = force_recompute,
+    dir = cache_dir
+  )
 }
