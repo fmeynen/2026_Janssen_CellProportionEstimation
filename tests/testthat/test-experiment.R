@@ -50,3 +50,30 @@ test_that("a multi-p_max run warns on impossible combinations and keeps only fea
   )
   expect_setequal(unique(res$curves$p_max), 0.8)
 })
+
+test_that("feasible_scenarios skips impossible fixed-max combinations and warns", {
+  # alpha = 1, K = 10: p_max = 0.05 is impossible (remainder components exceed it), p_max = 0.4 is feasible.
+  expect_warning(
+    fs <- feasible_scenarios(alpha = 1, K = 10L, proportion_method = "fixed_max_beta", p_max = c(0.05, 0.4)),
+    "Impossible fixed_max_beta combination"
+  )
+  expect_identical(fs$feasible, c(FALSE, TRUE))
+  expect_equal(fs$grid$p_max, c(0.05, 0.4))
+  expect_null(fs$p[[1L]])
+  expect_equal(sum(fs$p[[2L]]), 1, tolerance = 1e-12)
+  expect_equal(fs$p[[2L]][[10L]], 0.4, tolerance = 1e-12)
+})
+
+test_that("feasible_scenarios errors when no combination is feasible", {
+  suppressWarnings(expect_error(
+    feasible_scenarios(1, 10L, "fixed_max_beta", c(0.02, 0.05)),
+    "No feasible alpha/p_max combinations"
+  ))
+})
+
+test_that("feasible_scenarios returns one NA-p_max row per alpha for beta proportions", {
+  fs <- feasible_scenarios(alpha = c(1, 2), K = 5L, proportion_method = "beta", p_max = NULL)
+  expect_identical(fs$feasible, c(TRUE, TRUE))
+  expect_true(all(is.na(fs$grid$p_max)))
+  expect_equal(fs$grid$alpha, c(1, 2))
+})

@@ -181,6 +181,68 @@ run_sample_size_experiment <- function(
 
 
 # Run individual experiments --------------------------------------------------------------------------------------
+#' Generate true proportions for every alpha x p_max scenario, skipping impossible fixed-max combinations.
+#'
+#' Validates `p_max` (for `proportion_method = "fixed_max_beta"`), builds the alpha x p_max grid (alpha varies
+#' fastest) and calls `generate_proportions()` once per row. `generate_proportions()` is RNG-free, so calling it
+#' up front does not change any random draws made later by the simulation. When several `p_max` values are given,
+#' impossible fixed-max combinations are skipped (`generate_props_fixed_max_beta()` warns once per combination);
+#' otherwise the error is propagated. Stops if no combination is feasible.
+#'
+#' @return A list with `grid` (data.frame with `alpha`, `p_max` (NA unless fixed-max), `population_id`),
+#'   `p` (list of proportion vectors, one per grid row; NULL for skipped rows) and `feasible` (logical vector).
+feasible_scenarios <- function(alpha, K, proportion_method, p_max) {
+  if (identical(proportion_method, "fixed_max_beta")) {
+    validate_p_max(p_max)
+    p_max_values <- as.numeric(p_max)
+  } else {
+    p_max_values <- NA_real_
+  }
+
+  grid <- expand.grid(
+    alpha = alpha,
+    p_max = p_max_values,
+    KEEP.OUT.ATTRS = FALSE,
+    stringsAsFactors = FALSE
+  )
+  grid$population_id <- seq_len(nrow(grid))
+
+  skip_impossible <- identical(proportion_method, "fixed_max_beta") &&
+    length(p_max_values) > 1L
+
+  p_list <- vector("list", nrow(grid))
+  for (i in seq_len(nrow(grid))) {
+    p_max_i <- grid$p_max[[i]]
+    p <- tryCatch(
+      generate_proportions(
+        alpha = grid$alpha[[i]],
+        K = K,
+        method = proportion_method,
+        p_max = if (is.na(p_max_i)) NULL else p_max_i
+      ),
+      error = function(e) {
+        if (skip_impossible && inherits(e, "impossible_fixed_max_error")) {
+          return(NULL)
+        }
+        stop(e)
+      }
+    )
+    if (!is.null(p)) {
+      p_list[[i]] <- p
+    }
+  }
+
+  feasible <- !vapply(p_list, is.null, logical(1L))
+  if (!any(feasible)) {
+    stop(
+      "No feasible alpha/p_max combinations produced simulation output.",
+      call. = FALSE
+    )
+  }
+  list(grid = grid, p = p_list, feasible = feasible)
+}
+
+
 run_dirichlet_multinomial_experiment <- function(
   alpha,
   K,
@@ -205,19 +267,8 @@ run_dirichlet_multinomial_experiment <- function(
     allow_vector = TRUE
   )
 
-  if (identical(proportion_method, "fixed_max_beta")) {
-    validate_p_max(p_max)
-    p_max_values <- as.numeric(p_max)
-  } else {
-    p_max_values <- NA_real_
-  }
-
-  population_scenarios <- expand.grid(
-    alpha = alpha,
-    p_max = p_max_values,
-    KEEP.OUT.ATTRS = FALSE,
-    stringsAsFactors = FALSE
-  )
+  feasible <- feasible_scenarios(alpha, K, proportion_method, p_max)
+  population_scenarios <- feasible$grid
   person_scenarios <- expand.grid(
     n_people = n_people,
     concentration = concentration,
@@ -235,55 +286,10 @@ run_dirichlet_multinomial_experiment <- function(
   p_table_list <- vector("list", nrow(scenario_grid))
   person_results_list <- vector("list", nrow(scenario_grid))
   keep <- logical(nrow(scenario_grid))
-  population_compositions <- list()
-  impossible_population_keys <- character()
-  skip_impossible <- identical(proportion_method, "fixed_max_beta") &&
-    length(p_max_values) > 1L
 
   for (i in seq_len(nrow(scenario_grid))) {
     scenario <- scenario_grid[i, , drop = FALSE]
-    population_key <- paste(
-      format(scenario$alpha[[1L]], scientific = FALSE, trim = TRUE),
-      if (is.na(scenario$p_max[[1L]])) {
-        "NA"
-      } else {
-        format(scenario$p_max[[1L]], scientific = FALSE, trim = TRUE)
-      },
-      sep = "__"
-    )
-    if (population_key %in% impossible_population_keys) {
-      next
-    }
-    p <- population_compositions[[population_key]]
-    if (is.null(p)) {
-      p <- tryCatch(
-        generate_proportions(
-          alpha = scenario$alpha[[1L]],
-          K = K,
-          method = proportion_method,
-          p_max = if (is.na(scenario$p_max[[1L]])) {
-            NULL
-          } else {
-            scenario$p_max[[1L]]
-          }
-        ),
-        error = function(e) {
-          if (skip_impossible && inherits(e, "impossible_fixed_max_error")) {
-            return(NULL)
-          }
-          stop(e)
-        }
-      )
-      if (!is.null(p)) {
-        population_compositions[[population_key]] <- p
-      }
-    }
-    if (is.null(p)) {
-      impossible_population_keys <- c(
-        impossible_population_keys,
-        population_key
-      )
-    }
+    p <- feasible$p[[scenario$population_id[[1L]]]]
     if (is.null(p)) {
       next
     }
@@ -330,13 +336,6 @@ run_dirichlet_multinomial_experiment <- function(
       )
     )
     keep[[i]] <- TRUE
-  }
-
-  if (!any(keep)) {
-    stop(
-      "No feasible alpha/p_max combinations produced simulation output.",
-      call. = FALSE
-    )
   }
 
   list(
@@ -595,19 +594,8 @@ run_simulation_experiment <- function(
     stop("n must be provided for model = 'multinomial'.", call. = FALSE)
   }
 
-  if (identical(proportion_method, "fixed_max_beta")) {
-    validate_p_max(p_max)
-    p_max_values <- as.numeric(p_max)
-  } else {
-    p_max_values <- NA_real_
-  }
-
-  combinations <- expand.grid(
-    alpha = alpha,
-    p_max = p_max_values,
-    KEEP.OUT.ATTRS = FALSE,
-    stringsAsFactors = FALSE
-  )
+  feasible <- feasible_scenarios(alpha, K, proportion_method, p_max)
+  combinations <- feasible$grid
   n_combinations <- nrow(combinations)
   p_table_list <- vector("list", n_combinations)
   replicate_summaries_list <- vector("list", n_combinations)
@@ -616,36 +604,15 @@ run_simulation_experiment <- function(
   curves_list <- vector("list", n_combinations)
   argmax_summary_list <- vector("list", n_combinations)
   keep <- logical(n_combinations)
-  should_skip_impossible_combinations <- identical(
-    proportion_method,
-    "fixed_max_beta"
-  ) &&
-    length(p_max_values) > 1L
 
   for (i in seq_len(n_combinations)) {
     alpha_i <- combinations$alpha[[i]]
     p_max_i <- combinations$p_max[[i]]
     seed_i <- if (is.null(seed)) NULL else seed + i - 1L
-    p <- tryCatch(
-      generate_proportions(
-        alpha = alpha_i,
-        K = K,
-        method = proportion_method,
-        p_max = if (is.na(p_max_i)) NULL else p_max_i
-      ),
-      error = function(e) {
-        if (
-          should_skip_impossible_combinations &&
-            inherits(e, "impossible_fixed_max_error")
-        ) {
-          return(NULL)
-        }
-        stop(e)
-      }
-    )
+    p <- feasible$p[[i]]
     if (is.null(p)) {
       next
-    } # Skip impossible alpha/p_max combinations caught by the error handler.
+    } # Skip impossible alpha/p_max combinations (already warned in feasible_scenarios()).
 
     rep_out <- run_replicates(
       p,
@@ -707,13 +674,6 @@ run_simulation_experiment <- function(
       "fraction",
       "p_value"
     )]
-  }
-
-  if (!any(keep)) {
-    stop(
-      "No feasible alpha/p_max combinations produced simulation output.",
-      call. = FALSE
-    )
   }
 
   p_table_list <- p_table_list[keep]
