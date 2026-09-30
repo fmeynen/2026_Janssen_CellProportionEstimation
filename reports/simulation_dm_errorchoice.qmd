@@ -184,11 +184,6 @@ p_min_all <- min(p_mat)
 
 At the simulated concentration $c = `r format(c_conc, big.mark = ",", scientific = FALSE)`$, a cell type with a population mean of `r pct(p_ex, 0)` has a between-person SD of `r fmt(sqrt(p_ex * (1 - p_ex) / (c_conc + 1)), 2)`, so 95% of people have between `r pct(q_ex[1])` and `r pct(q_ex[2])` of that type. For rare types the *relative* spread is larger. For $p_j = `r p_rare`$ (CV `r fmt(sqrt((1 - p_rare) / (p_rare * (c_conc + 1))), 2)`), 95% of people have between `r pct(q_rare[1], 2)` and `r pct(q_rare[2], 2)`. Only for the very rarest types, where $c\,p_j \ll 1$ (down to $c\,p_j \approx `r fmt(c_conc * p_min_all, 2)`$ at $\alpha = `r alpha_max`$), is the distribution of $\theta_{ij}$ heavily skewed. There, almost everyone has essentially none of that cell type, and a few people have a lot.
 
-::: {.callout-important}
-## $c = `r format(c_conc, big.mark = ",", scientific = FALSE)`$ is an assumption
-
-This value is taken as a more realistic level of between-person variability than strongly heterogeneous choices such as $c = 50$. It still has to be confirmed with an estimate from real per-person data. All results below depend on $c$.
-:::
 
 # Simulation results {#sec-results}
 
