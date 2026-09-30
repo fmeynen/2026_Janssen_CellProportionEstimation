@@ -119,3 +119,23 @@ validate_required_columns <- function(df, required, arg = "person_results") {
   }
   invisible(df)
 }
+
+#' Validate `p_max` for `fixed_max_beta` proportions.
+#'
+#' Stops (with `call. = FALSE`) if `p_max` is NULL or is not a numeric vector of
+#' finite values strictly between 0 and 1.
+#'
+#' @param p_max       Value to check.
+#' @param method_arg  Name of the method argument, used in the error message.
+validate_p_max <- function(p_max, method_arg = "proportion_method") {
+  if (is.null(p_max)) {
+    stop(
+      sprintf("p_max must be provided when %s = 'fixed_max_beta'.", method_arg),
+      call. = FALSE
+    )
+  }
+  if (!is.numeric(p_max) || any(!is.finite(p_max)) || any(p_max <= 0) || any(p_max >= 1)) {
+    stop("p_max must contain number(s) strictly between 0 and 1.", call. = FALSE)
+  }
+  invisible(p_max)
+}

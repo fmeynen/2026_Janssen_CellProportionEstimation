@@ -206,23 +206,7 @@ run_dirichlet_multinomial_experiment <- function(
   )
 
   if (identical(proportion_method, "fixed_max_beta")) {
-    if (is.null(p_max)) {
-      stop(
-        "p_max must be provided when proportion_method = 'fixed_max_beta'.",
-        call. = FALSE
-      )
-    }
-    if (
-      !is.numeric(p_max) ||
-        any(!is.finite(p_max)) ||
-        any(p_max <= 0) ||
-        any(p_max >= 1)
-    ) {
-      stop(
-        "p_max must contain numbers strictly between 0 and 1.",
-        call. = FALSE
-      )
-    }
+    validate_p_max(p_max)
     p_max_values <- as.numeric(p_max)
   } else {
     p_max_values <- NA_real_
@@ -611,23 +595,7 @@ run_simulation_experiment <- function(
   }
 
   if (identical(proportion_method, "fixed_max_beta")) {
-    if (is.null(p_max)) {
-      stop(
-        "p_max must be provided when proportion_method = 'fixed_max_beta'.",
-        call. = FALSE
-      )
-    }
-    if (
-      !is.numeric(p_max) ||
-        any(!is.finite(p_max)) ||
-        any(p_max <= 0) ||
-        any(p_max >= 1)
-    ) {
-      stop(
-        "p_max must contain numbers strictly between 0 and 1.",
-        call. = FALSE
-      )
-    }
+    validate_p_max(p_max)
     p_max_values <- as.numeric(p_max)
   } else {
     p_max_values <- NA_real_

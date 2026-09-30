@@ -51,12 +51,7 @@ generate_props_fixed_max_beta <- function(alpha, K = 10, p_max,
   if (!is.numeric(K) || length(K) != 1L || !is.finite(K) || K %% 1 != 0 || K < 2L) {
     stop("K must be a single integer >= 2 for method = 'fixed_max_beta'.", call. = FALSE)
   }
-  if (is.null(p_max)) {
-    stop("p_max must be provided when method = 'fixed_max_beta'.", call. = FALSE)
-  }
-  if (!is.numeric(p_max) || any(!is.finite(p_max)) || any(p_max <= 0) || any(p_max >= 1)) {
-    stop("p_max must contain number(s) strictly between 0 and 1.", call. = FALSE)
-  }
+  validate_p_max(p_max, method_arg = "method")
   if (length(grid) != K - 1L) {
     stop("grid must have length K - 1 for method = 'fixed_max_beta'.", call. = FALSE)
   }
