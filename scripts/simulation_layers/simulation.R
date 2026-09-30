@@ -410,6 +410,31 @@ replicate_cores <- function() {
   as.integer(cores)
 }
 
+#' Snapshot the global RNG kind and state, returning a function that restores them.
+#'
+#' Captures `RNGkind()` and `.Random.seed` (or its absence) in the global environment. Intended
+#' usage in a caller: `restore_rng <- save_rng_state(); on.exit(restore_rng(), add = TRUE)`. (The
+#' `on.exit()` must live in the caller, since it would otherwise fire when this helper returns.)
+#' The RNG kind is restored *before* `.Random.seed` is re-assigned: assigning `.Random.seed` while
+#' the active kind still differs re-derives/mutates the seed instead of reinstating it exactly. If
+#' no `.Random.seed` existed at snapshot time, any seed created since is removed.
+#'
+#' @return A zero-argument function that restores the snapshotted RNG kind and state.
+save_rng_state <- function() {
+  old_kind <- RNGkind()
+  has_old_seed <- exists(".Random.seed", envir = globalenv(), inherits = FALSE)
+  old_seed <- if (has_old_seed) get(".Random.seed", envir = globalenv()) else NULL
+  function() {
+    suppressWarnings(RNGkind(old_kind[[1L]], old_kind[[2L]], old_kind[[3L]]))
+    if (has_old_seed) {
+      assign(".Random.seed", old_seed, envir = globalenv())
+    } else if (exists(".Random.seed", envir = globalenv(), inherits = FALSE)) {
+      rm(".Random.seed", envir = globalenv())
+    }
+    invisible(NULL)
+  }
+}
+
 #' Build B independent, reproducible L'Ecuyer-CMRG RNG streams.
 #'
 #' Each returned element is a `.Random.seed` vector that, once installed as the active RNG state
@@ -440,19 +465,8 @@ replicate_streams <- function(seed, B) {
     seed <- sample.int(.Machine$integer.max, 1L)
   }
 
-  old_kind <- RNGkind()
-  has_old_seed <- exists(".Random.seed", envir = globalenv(), inherits = FALSE)
-  old_seed <- if (has_old_seed) get(".Random.seed", envir = globalenv()) else NULL
-  on.exit({
-    # RNGkind() must be restored *before* re-assigning .Random.seed: assigning .Random.seed while
-    # the active kind still differs re-derives/mutates the seed instead of reinstating it exactly.
-    suppressWarnings(RNGkind(old_kind[[1L]], old_kind[[2L]], old_kind[[3L]]))
-    if (has_old_seed) {
-      assign(".Random.seed", old_seed, envir = globalenv())
-    } else if (exists(".Random.seed", envir = globalenv(), inherits = FALSE)) {
-      rm(".Random.seed", envir = globalenv())
-    }
-  }, add = TRUE)
+  restore_rng <- save_rng_state()
+  on.exit(restore_rng(), add = TRUE)
 
   RNGkind("L'Ecuyer-CMRG")
   set.seed(seed)
@@ -524,19 +538,8 @@ check_replicate_results <- function(results) {
 #'
 #' @return A list of length `length(streams)`, in replicate order, of `FUN`'s return values.
 replicate_apply <- function(streams, FUN) {
-  old_kind <- RNGkind()
-  has_old_seed <- exists(".Random.seed", envir = globalenv(), inherits = FALSE)
-  old_seed <- if (has_old_seed) get(".Random.seed", envir = globalenv()) else NULL
-  on.exit({
-    # RNGkind() must be restored *before* re-assigning .Random.seed: assigning .Random.seed while
-    # the active kind still differs re-derives/mutates the seed instead of reinstating it exactly.
-    suppressWarnings(RNGkind(old_kind[[1L]], old_kind[[2L]], old_kind[[3L]]))
-    if (has_old_seed) {
-      assign(".Random.seed", old_seed, envir = globalenv())
-    } else if (exists(".Random.seed", envir = globalenv(), inherits = FALSE)) {
-      rm(".Random.seed", envir = globalenv())
-    }
-  }, add = TRUE)
+  restore_rng <- save_rng_state()
+  on.exit(restore_rng(), add = TRUE)
 
   RNGkind("L'Ecuyer-CMRG")
 
