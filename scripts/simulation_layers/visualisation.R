@@ -1,5 +1,5 @@
 
-# Visualization Layer ---------------------------------------------------------------------------------------------
+# Visualisation Layer ---------------------------------------------------------------------------------------------
 
 # Visualisation layer: plotting functions for simulation results.
 #
