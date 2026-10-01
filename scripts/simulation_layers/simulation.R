@@ -291,8 +291,7 @@ simulate_counts_dirichlet_multinomial <- function(p, n_people, n_per_person, con
 #'   proportion matrices.
 simulate_counts <- function(p, n = NULL,
                             model = c("multinomial",
-                                      "dirichlet_multinomial",
-                                      "logistic_normal_multinomial"),
+                                      "dirichlet_multinomial"),
                             n_people = NULL,
                             n_per_person = NULL,
                             concentration = NULL,
@@ -310,10 +309,6 @@ simulate_counts <- function(p, n = NULL,
       n_people = n_people,
       n_per_person = n_per_person,
       concentration = concentration
-    ),
-    logistic_normal_multinomial = stop(
-      "model = 'logistic_normal_multinomial' is not yet implemented.",
-      call. = FALSE
     )
   )
 }

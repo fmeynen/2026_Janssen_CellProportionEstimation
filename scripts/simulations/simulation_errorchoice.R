@@ -12,7 +12,7 @@
 #   4. Summarise which cell type most often drives the max error.
 #
 # Possible future changes:
-#   * Allow correlations    -> model = "logistic_normal_multinomial"
+#   * Allow correlations    -> a logistic-normal multinomial model (not implemented yet)
 #   * Other monotone curves (exponential, power, ...)
 #   * Additional error metrics
 #   * Distribution of max errors (not just success rates)
