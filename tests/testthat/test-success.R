@@ -1,5 +1,5 @@
-# Tests for replicate_pooled_error(), replicate_success() and extract_success_rate() in
-# scripts/simulation_layers/extraction.R
+# Tests for replicate_pooled_error() and replicate_success() in scripts/simulation_layers/calculation.R, and
+# extract_success_rate() in scripts/simulation_layers/extraction.R
 
 
 #' Build a minimal person_results data.frame.

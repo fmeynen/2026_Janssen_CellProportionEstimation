@@ -332,46 +332,6 @@ counts_to_proportions <- function(y, n = sum(y)) {
   y / n
 }
 
-# Compute Errors --------------------------------------------------------------------------------------------------
-
-#' Compute per-cell-type error vectors for each requested metric.
-#'
-#' @param phat    Observed proportion vector (length K).
-#' @param p       True proportion vector (length K).
-#' @param metrics Character vector; any subset of `c("AE", "ARE", "TSE", "LAE")`.
-#' @param n       Total sample size; required only when `"TSE"` is in `metrics`.
-#'
-#' @return Named list with one numeric vector per metric (length K).
-#'
-#' @details
-#' AE  = abs(phat - p)
-#' ARE = abs(phat - p) / p  (no epsilon stabilisation; NaN/Inf for p == 0 is expected)
-#' TSE = asinh(sqrt(2 * n^2 * (phat - p)^2))  (requires n)
-#' LAE = log(abs(phat - p))
-compute_errors <- function(phat, p, metrics = c("AE", "ARE"), n = NULL) {
-  if (length(phat) != length(p)) {
-    stop("phat and p must have the same length.", call. = FALSE)
-  }
-  if ("TSE" %in% metrics && is.null(n)) {
-    stop("n must be provided when metric 'TSE' is requested.", call. = FALSE)
-  }
-  result <- list()
-  if ("AE" %in% metrics) {
-    result[["AE"]] <- abs(phat - p)
-  }
-  if ("ARE" %in% metrics) {
-    result[["ARE"]] <- abs(phat - p) / p   # ARE: NaN when p == 0 and phat == 0 (0/0);
-                                           # Inf when p == 0 and phat != 0; no stabilisation by design
-  }
-  if ("TSE" %in% metrics) {
-    result[["TSE"]] <- asinh(sqrt(2 * n^2 * (phat - p)^2))
-  }
-  if ("LAE" %in% metrics) {
-    result[["LAE"]] <- log(abs(phat - p))
-  }
-  result
-}
-
 # Replicate RNG helpers ---------------------------------------------------------------------------------------
 
 #' Number of cores to use for replicate-level parallelism.
