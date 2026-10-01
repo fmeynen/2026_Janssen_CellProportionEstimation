@@ -213,26 +213,6 @@ simulate_counts_multinomial <- function(p, n) {
   as.integer(rmultinom(1L, size = n, prob = p))
 }
 
-#' Draw one composition from a Dirichlet distribution.
-#'
-#' @param concentration_parameters Positive Dirichlet concentration parameters.
-#'
-#' @return Numeric vector on the simplex with the same length as
-#'   `concentration_parameters`.
-sample_dirichlet <- function(concentration_parameters) {
-  concentration_parameters <- validate_positive_numeric(
-    concentration_parameters,
-    "concentration_parameters",
-    allow_vector = TRUE
-  )
-  draws <- stats::rgamma(length(concentration_parameters), shape = concentration_parameters, rate = 1)
-  total <- sum(draws)
-  if (!is.finite(total) || total <= 0) {
-    stop("Dirichlet sampling produced an invalid total gamma draw.", call. = FALSE)
-  }
-  draws / total
-}
-
 #' Simulate person-level counts from a Dirichlet-multinomial hierarchy.
 #'
 #' @param p Population mean proportion vector.
@@ -249,11 +229,23 @@ simulate_counts_dirichlet_multinomial <- function(p, n_people, n_per_person, con
   concentration <- validate_positive_numeric(concentration, "concentration")
 
   K <- length(p)
-  person_true_proportions <- t(vapply(
-    seq_len(n_people),
-    function(person_id) sample_dirichlet(concentration * p),
-    FUN.VALUE = numeric(K)
-  ))
+  concentration_parameters <- validate_positive_numeric(
+    concentration * p,
+    "concentration_parameters",
+    allow_vector = TRUE
+  )
+  # One Dirichlet draw per person via normalised gammas, drawn in a single call. The matrix fills column-major, so
+  # column k holds the n_people draws with shape concentration_parameters[k].
+  gamma_draws <- matrix(
+    stats::rgamma(n_people * K, shape = rep(concentration_parameters, each = n_people), rate = 1),
+    nrow = n_people,
+    ncol = K
+  )
+  totals <- rowSums(gamma_draws)
+  if (any(!is.finite(totals) | totals <= 0)) {
+    stop("Dirichlet sampling produced an invalid total gamma draw.", call. = FALSE)
+  }
+  person_true_proportions <- gamma_draws / totals
   counts <- t(vapply(
     seq_len(n_people),
     function(person_id) simulate_counts_multinomial(person_true_proportions[person_id, ], n_per_person),
