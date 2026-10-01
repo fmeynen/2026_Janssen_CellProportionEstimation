@@ -163,7 +163,9 @@ generate_props_fixed_min_beta <- function(alpha, K = 10, p_min,
 #'                 vector when calling the fixed-max generator directly.
 #' @param p_min   Fixed smallest true proportion for `"fixed_min_beta"`. The smallest value is always placed at the
 #'                lowest index (ties allowed); impossible combinations warn and fail. May be a numeric vector.
-#' @param grid    Evaluation points in (0,1), length K (used by `"beta"`).
+#' @param grid    Optional evaluation points in (0,1). `NULL` (default) uses each method's own default grid. When
+#'                supplied, it must have length K for `"beta"` and length K - 1 for `"fixed_max_beta"` /
+#'                `"fixed_min_beta"`.
 #'
 #' @return Numeric vector of length K, all strictly positive, summing to 1.
 #'   For methods `"fixed_max_beta"` / `"fixed_min_beta"` with vector `p_max` / `p_min`, returns a numeric matrix with
@@ -172,19 +174,22 @@ generate_proportions <- function(alpha, K = 10,
                                  method = c("beta", "fixed_max_beta", "fixed_min_beta"),
                                  p_max = NULL,
                                  p_min = NULL,
-                                 grid = default_beta_grid(K)) {
+                                 grid = NULL) {
   method <- match.arg(method)
+  # Forward grid only when supplied, so each generator otherwise uses its own default length.
+  grid_arg <- if (is.null(grid)) list() else list(grid = grid)
   switch(method,
-    beta = generate_proportions_beta(alpha = alpha, K = K, grid = grid),
-    fixed_max_beta = generate_props_fixed_max_beta(
-      alpha = alpha,
-      K = K,
-      p_max = p_max
+    beta = do.call(
+      generate_proportions_beta,
+      c(list(alpha = alpha, K = K), grid_arg)
     ),
-    fixed_min_beta = generate_props_fixed_min_beta(
-      alpha = alpha,
-      K = K,
-      p_min = p_min
+    fixed_max_beta = do.call(
+      generate_props_fixed_max_beta,
+      c(list(alpha = alpha, K = K, p_max = p_max), grid_arg)
+    ),
+    fixed_min_beta = do.call(
+      generate_props_fixed_min_beta,
+      c(list(alpha = alpha, K = K, p_min = p_min), grid_arg)
     )
   )
 }

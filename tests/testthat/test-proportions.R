@@ -106,6 +106,39 @@ test_that("fixed_min_beta warns then fails with a classed error on impossible co
   )
 })
 
+test_that("generate_proportions without grid matches each generator's default", {
+  expect_identical(
+    generate_proportions(alpha = 2, K = 10, method = "beta"),
+    generate_proportions_beta(alpha = 2, K = 10)
+  )
+  expect_identical(
+    generate_proportions(alpha = 2, K = 10, method = "fixed_max_beta", p_max = 0.4),
+    generate_props_fixed_max_beta(alpha = 2, K = 10, p_max = 0.4)
+  )
+  expect_identical(
+    generate_proportions(alpha = 2, K = 10, method = "fixed_min_beta", p_min = 0.01),
+    generate_props_fixed_min_beta(alpha = 2, K = 10, p_min = 0.01)
+  )
+})
+
+test_that("generate_proportions forwards a custom grid to the fixed methods", {
+  grid <- seq(0.2, 0.8, length.out = 9L)
+  p_max <- generate_proportions(alpha = 2, K = 10, method = "fixed_max_beta", p_max = 0.4, grid = grid)
+  expect_identical(p_max, generate_props_fixed_max_beta(alpha = 2, K = 10, p_max = 0.4, grid = grid))
+  expect_false(isTRUE(all.equal(p_max, generate_props_fixed_max_beta(alpha = 2, K = 10, p_max = 0.4))))
+
+  p_min <- generate_proportions(alpha = 2, K = 10, method = "fixed_min_beta", p_min = 0.01, grid = grid)
+  expect_identical(p_min, generate_props_fixed_min_beta(alpha = 2, K = 10, p_min = 0.01, grid = grid))
+  expect_false(isTRUE(all.equal(p_min, generate_props_fixed_min_beta(alpha = 2, K = 10, p_min = 0.01))))
+})
+
+test_that("generate_proportions rejects a wrong-length grid for fixed_max_beta", {
+  expect_error(
+    generate_proportions(alpha = 2, K = 10, method = "fixed_max_beta", p_max = 0.4, grid = default_beta_grid(10)),
+    "grid must have length K - 1"
+  )
+})
+
 test_that("validate_proportions rejects zero proportions", {
   expect_error(validate_proportions(c(0.5, 0.5, 0.0)))
 })
