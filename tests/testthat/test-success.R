@@ -1,5 +1,5 @@
-# Tests for replicate_pooled_error() and replicate_success() in scripts/simulation_layers/calculation.R, and
-# extract_success_rate() in scripts/simulation_layers/extraction.R
+# Tests for pooled_error_stat(), replicate_pooled_error() and replicate_success() in
+# scripts/simulation_layers/calculation.R, and extract_success_rate() in scripts/simulation_layers/extraction.R
 
 
 #' Build a minimal person_results data.frame.
@@ -242,4 +242,42 @@ test_that("extract_success_rate() output format is unchanged", {
   expect_equal(out$success_count, 1L)
   expect_equal(out$success_rate, 0.5)
   expect_equal(out$success_rate_AE, 0.5)
+})
+
+
+test_that("pooled_error_stat() AE is the row-wise max of the absolute errors", {
+  # Row 1: errors (0.1, 0.1, 0); row 2: errors (0.2, 0, 0.2) -> 0.1 and 0.2.
+  pbar <- rbind(c(0.3, 0.4, 0.3), c(0.4, 0.5, 0.1))
+  p <- c(0.2, 0.5, 0.3)
+  expect_equal(pooled_error_stat(pbar, p, "AE"), c(0.1, 0.2))
+})
+
+
+test_that("pooled_error_stat() ARE divides each error by its true proportion", {
+  # Row 1: relative errors (0.5, 0.2) -> 0.5; row 2: (0, 0.4) -> 0.4.
+  pbar <- rbind(c(0.3, 0.4), c(0.2, 0.7))
+  p <- c(0.2, 0.5)
+  expect_equal(pooled_error_stat(pbar, p, "ARE"), c(0.5, 0.4))
+})
+
+
+test_that("pooled_error_stat() ARE counts 0/0 as 0 and keeps Inf", {
+  # Cell type 1 has p = 0. Row 1: pbar_1 = 0 -> NaN -> 0, so the max is cell type 2's 0.25.
+  # Row 2: pbar_1 > 0 -> Inf.
+  pbar <- rbind(c(0, 0.75), c(0.1, 0.9))
+  p <- c(0, 1)
+  expect_equal(pooled_error_stat(pbar, p, "ARE"), c(0.25, Inf))
+})
+
+
+test_that("pooled_error_stat() handles a single replicate", {
+  pbar <- matrix(c(0.25, 0.75), nrow = 1L)
+  expect_equal(pooled_error_stat(pbar, c(0.5, 0.5), "AE"), 0.25)
+  expect_equal(pooled_error_stat(pbar, c(0.5, 0.5), "ARE"), 0.5)
+})
+
+
+test_that("pooled_error_stat() rejects metrics other than AE and ARE", {
+  pbar <- matrix(c(0.25, 0.75), nrow = 1L)
+  expect_error(pooled_error_stat(pbar, c(0.5, 0.5), "TSE"), "AE and ARE only")
 })
