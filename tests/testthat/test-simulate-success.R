@@ -1,6 +1,6 @@
 # Tests for simulate_success_at_n() -----------------------------------------------------------------------------
-# Both models must route through the shared replicate_success() success rule (calculation.R); the old
-# required_person_fraction / per-person rule has been removed entirely.
+# Both models must route through the shared pooled-proportion success rule (pooled_error_stat() in calculation.R);
+# the old required_person_fraction / per-person rule has been removed entirely. Also tests pass_from_max_errors().
 
 multinomial_config <- list(
   K                 = 3L,
@@ -41,12 +41,19 @@ test_that("multinomial success matches a direct recomputation from rep_out$max_e
   expect_equal(res$success_rate, mean(expected))
 })
 
-test_that("dirichlet_multinomial success matches replicate_success() on rep_out$person_results", {
+test_that("dirichlet_multinomial success matches pooled_error_stat() on rep_out$phat", {
   res <- simulate_success_at_n(alpha = 1, n = 10L, config = dm_config, seed = 42)
 
-  expected <- replicate_success(res$rep_out$person_results, dm_config$taus)$pass
+  phat     <- res$rep_out$phat
+  p        <- res$rep_out$inputs$p
+  expected <- rep(TRUE, nrow(phat))
+  for (m in names(dm_config$taus)) {
+    stat <- pooled_error_stat(phat, p, m)
+    expect_identical(unname(res$rep_out$max_errors[, m]), stat)
+    expected <- expected & (stat <= dm_config$taus[[m]])
+  }
 
-  expect_identical(res$success, as.logical(expected))
+  expect_identical(res$success, expected)
   expect_identical(res$success_count, sum(expected))
   expect_equal(res$success_rate, mean(expected))
 })
@@ -65,10 +72,10 @@ test_that("results are reproducible for the same seed and change for a different
   res_dm1 <- simulate_success_at_n(alpha = 1, n = 10L, config = dm_config, seed = 42)
   res_dm2 <- simulate_success_at_n(alpha = 1, n = 10L, config = dm_config, seed = 42)
   expect_identical(res_dm1$success, res_dm2$success)
-  expect_identical(res_dm1$rep_out$person_results, res_dm2$rep_out$person_results)
+  expect_identical(res_dm1$rep_out$phat, res_dm2$rep_out$phat)
 
   res_dm3 <- simulate_success_at_n(alpha = 1, n = 10L, config = dm_config, seed = 999)
-  expect_false(isTRUE(all.equal(res_dm1$rep_out$person_results$error, res_dm3$rep_out$person_results$error)))
+  expect_false(isTRUE(all.equal(res_dm1$rep_out$max_errors, res_dm3$rep_out$max_errors)))
 })
 
 test_that("common random numbers: the same seed is deterministic at each of two sample sizes", {
@@ -145,6 +152,91 @@ test_that("config$p_max is passed to generate_proportions() for proportion_metho
 
   expect_gte(res$success_rate, 0)
   expect_lte(res$success_rate, 1)
-  # The true proportions used are exposed as population_mean_proportion; the largest must be exactly p_max.
-  expect_equal(max(res$rep_out$person_results$population_mean_proportion), fixed_config$p_max)
+  # The true proportions used are exposed as rep_out$inputs$p; the largest must be exactly p_max.
+  expect_equal(max(res$rep_out$inputs$p), fixed_config$p_max)
+})
+
+
+# pass_from_max_errors() ------------------------------------------------------------------------------------------
+
+test_that("pass_from_max_errors() ANDs max_errors[, m] <= taus[[m]] across metrics", {
+  max_errors <- matrix(
+    c(0.01, 0.03, 0.02, 0.01,
+      0.5,  0.5,  3,    2),
+    ncol = 2, dimnames = list(NULL, c("AE", "ARE"))
+  )
+  taus <- list(AE = 0.02, ARE = 2)
+
+  # Row 2 fails AE, row 3 fails ARE; the boundary (== tau) passes.
+  expect_identical(pass_from_max_errors(max_errors, taus), c(TRUE, FALSE, FALSE, TRUE))
+  expect_identical(pass_from_max_errors(max_errors, list(AE = 0.02)), c(TRUE, FALSE, TRUE, TRUE))
+})
+
+test_that("pass_from_max_errors() agrees with replicate_success() on the same long-format data", {
+  # Two replicates, two persons, three cell types; one AE and one ARE row per (replicate, person, cell type).
+  p <- c(0.2, 0.3, 0.5)
+  observed <- list(
+    rbind(c(0.25, 0.30, 0.45), c(0.15, 0.35, 0.50)),
+    rbind(c(0.40, 0.20, 0.40), c(0.30, 0.30, 0.40))
+  )
+  rows <- list()
+  for (b in 1:2) {
+    for (person in 1:2) {
+      for (m in c("AE", "ARE")) {
+        rows[[length(rows) + 1L]] <- data.frame(
+          replicate = b, person_id = person, cell_type = 1:3, metric = m,
+          observed_proportion = observed[[b]][person, ], population_mean_proportion = p,
+          stringsAsFactors = FALSE
+        )
+      }
+    }
+  }
+  person_results <- do.call(rbind, rows)
+  phat <- rbind(colMeans(observed[[1]]), colMeans(observed[[2]]))
+  max_errors <- cbind(AE = pooled_error_stat(phat, p, "AE"), ARE = pooled_error_stat(phat, p, "ARE"))
+
+  for (taus in list(list(AE = 0.05, ARE = 0.5), list(AE = 0.2, ARE = 0.1), list(AE = 0.2, ARE = 1))) {
+    expect_identical(
+      pass_from_max_errors(max_errors, taus),
+      replicate_success(person_results, taus)$pass
+    )
+  }
+})
+
+test_that("pass_from_max_errors() skips taus metrics absent from max_errors with a warning, and errors if none remain", {
+  max_errors <- matrix(c(0.01, 0.05), ncol = 1, dimnames = list(NULL, "AE"))
+
+  expect_warning(
+    pass <- pass_from_max_errors(max_errors, list(AE = 0.02, ARE = 1)),
+    "metric 'ARE' is not in max_errors"
+  )
+  expect_identical(pass, c(TRUE, FALSE))
+
+  expect_error(
+    suppressWarnings(pass_from_max_errors(max_errors, list(ARE = 1))),
+    "None of the metrics in taus are present in max_errors."
+  )
+})
+
+test_that("pass_from_max_errors() ignores max_errors columns without a tau", {
+  max_errors <- matrix(c(0.01, 0.05, 100, 100), ncol = 2, dimnames = list(NULL, c("AE", "ARE")))
+  expect_no_warning(pass <- pass_from_max_errors(max_errors, list(AE = 0.02)))
+  expect_identical(pass, c(TRUE, FALSE))
+})
+
+test_that("pass_from_max_errors() fails Inf statistics and treats pooled_error_stat()'s NaN -> 0 as passing", {
+  # ARE with p_j = 0: pbar_j = 0 gives NaN -> 0 (passes); pbar_j > 0 gives Inf (fails).
+  p <- c(0, 0.4, 0.6)
+  phat <- rbind(c(0, 0.4, 0.6), c(0.1, 0.3, 0.6))
+  max_errors <- cbind(ARE = pooled_error_stat(phat, p, "ARE"))
+  expect_identical(max_errors[, "ARE"], c(0, Inf))
+  expect_identical(pass_from_max_errors(max_errors, list(ARE = 1e6)), c(TRUE, FALSE))
+})
+
+test_that("pass_from_max_errors() validates its inputs", {
+  max_errors <- matrix(0.01, dimnames = list(NULL, "AE"))
+  expect_error(pass_from_max_errors(unname(max_errors), list(AE = 0.02)), "named column")
+  expect_error(pass_from_max_errors(c(AE = 0.01), list(AE = 0.02)), "numeric matrix")
+  expect_error(pass_from_max_errors(max_errors, c(AE = 0.02)), "named list")
+  expect_error(pass_from_max_errors(max_errors, list(AE = c(0.01, 0.02))), "single numeric threshold")
 })

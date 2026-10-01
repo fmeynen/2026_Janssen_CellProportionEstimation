@@ -365,8 +365,9 @@ replicate_pooled_error <- function(person_results, metric) {
 
 #' Determine per-replicate success against a set of metric thresholds.
 #'
-#' Replicate success rule shared by `extract_success_rate()` and `simulate_success_at_n()` (both models). For each
-#' metric, the per-replicate statistic comes from `replicate_pooled_error()`, which applies `pooled_error_stat()`, the
+#' Long-format replicate success rule, used by `extract_success_rate()` and by `simulate_success_at_n()` for the
+#' multinomial model (`pass_from_max_errors()` is the matrix counterpart, used for the Dirichlet-multinomial
+#' model). For each metric, the per-replicate statistic comes from `replicate_pooled_error()`, which applies `pooled_error_stat()`, the
 #' single source of truth for the rule:
 #' the estimated proportions are averaged over persons per cell type, compared with the population-level true
 #' proportion, and the largest cell-type error is taken. A replicate passes that metric if this value is `<= tau`,
@@ -420,6 +421,53 @@ replicate_success <- function(person_results, taus) {
   replicate_pass <- replicate_pass[order(replicate_pass$scenario_id, replicate_pass$replicate), , drop = FALSE]
   rownames(replicate_pass) <- NULL
   replicate_pass[, c("scenario_id", "replicate", pass_cols, "pass")]
+}
+
+
+#' Determine per-replicate success from a matrix of pooled error statistics.
+#'
+#' Matrix counterpart of `replicate_success()`, for callers that already hold the per-replicate statistics, e.g. the
+#' `max_errors` returned by `run_replicates()` for the Dirichlet-multinomial model (each column computed by
+#' `pooled_error_stat()`). A replicate passes iff, for every metric in both `names(taus)` and
+#' `colnames(max_errors)`, `max_errors[, m] <= taus[[m]]`.
+#'
+#' Same semantics as `replicate_success()`: metrics in `taus` that are not columns of `max_errors` are skipped with a
+#' warning, and an error is raised if none remain; columns of `max_errors` without a tau are ignored silently.
+#' `NaN` statistics never occur when the columns come from `pooled_error_stat()` (it maps them to 0); an `Inf`
+#' statistic fails any finite tau; an `NA` statistic gives an `NA` pass, as in `replicate_success()`.
+#'
+#' @param max_errors Numeric matrix, B x M, with one column per metric (column names are metric names).
+#' @param taus       Named list with one scalar threshold per metric (e.g. `list(AE = 0.02, ARE = 0.5)`).
+#'
+#' @return Logical vector of length B, in row order of `max_errors`.
+pass_from_max_errors <- function(max_errors, taus) {
+  if (!is.matrix(max_errors) || !is.numeric(max_errors) || is.null(colnames(max_errors))) {
+    stop("max_errors must be a numeric matrix with one named column per metric.", call. = FALSE)
+  }
+  if (!is.list(taus) || is.null(names(taus)) || any(names(taus) == "")) {
+    stop("taus must be a named list with one scalar threshold per metric.", call. = FALSE)
+  }
+  for (m in names(taus)) {
+    if (!is.numeric(taus[[m]]) || length(taus[[m]]) != 1L || is.na(taus[[m]])) {
+      stop(sprintf("taus$%s must be a single numeric threshold.", m), call. = FALSE)
+    }
+  }
+
+  metrics <- names(taus)
+  missing_metrics <- setdiff(metrics, colnames(max_errors))
+  for (m in missing_metrics) {
+    warning(sprintf("pass_from_max_errors: metric '%s' is not in max_errors; it is skipped.", m), call. = FALSE)
+  }
+  metrics <- setdiff(metrics, missing_metrics)
+  if (length(metrics) == 0L) {
+    stop("None of the metrics in taus are present in max_errors.", call. = FALSE)
+  }
+
+  pass <- rep(TRUE, nrow(max_errors))
+  for (m in metrics) {
+    pass <- pass & (max_errors[, m] <= taus[[m]])
+  }
+  unname(pass)
 }
 
 
