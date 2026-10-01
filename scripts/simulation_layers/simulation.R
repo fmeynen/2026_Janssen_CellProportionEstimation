@@ -846,34 +846,22 @@ simulate_success_at_n <- function(alpha, n = NULL, config, seed = config$seed) {
     seed       = seed
   )
 
-  # rep_out$phat is a B x K matrix; flatten it into a long data.frame with a single synthetic person_id = 1 per
-  # replicate (one row per replicate/cell_type/metric) so replicate_success() can be reused for the multinomial
-  # model too. Pooling over one person is a no-op, so the rule reduces to the per-draw error against p.
-  B       <- nrow(rep_out$phat)
-  metrics <- config$metrics
-  grid <- expand.grid(
-    replicate = seq_len(B),
-    cell_type = seq_along(p),
-    metric    = metrics,
-    KEEP.OUT.ATTRS   = FALSE,
-    stringsAsFactors = FALSE
+  # The multinomial model is a single synthetic person per replicate, so pooling is a no-op and the rule reduces to
+  # the per-draw error of rep_out$phat (B x K) against p. Only metrics with a tau matter (others were warned about
+  # above); pooled_error_stat() is not defined for e.g. TSE/LAE, so those are only an error if they have a tau.
+  # (rep_out$max_errors is not used: it yields NaN rather than 0 for ARE 0/0.)
+  B            <- nrow(rep_out$phat)
+  used_metrics <- intersect(config$metrics, names(config$taus))
+  max_errors <- matrix(
+    vapply(used_metrics, function(m) pooled_error_stat(rep_out$phat, p, m), numeric(B)),
+    nrow = B, dimnames = list(NULL, used_metrics)
   )
-  person_results <- data.frame(
-    replicate                  = grid$replicate,
-    person_id                  = 1L,
-    cell_type                  = grid$cell_type,
-    metric                     = grid$metric,
-    observed_proportion        = rep_out$phat[cbind(grid$replicate, grid$cell_type)],
-    population_mean_proportion = p[grid$cell_type],
-    stringsAsFactors = FALSE
-  )
-
-  pass <- replicate_success(person_results, config$taus)
+  pass <- pass_from_max_errors(max_errors, config$taus)
 
   list(
-    success       = as.logical(pass$pass),
-    success_count = sum(pass$pass),
-    success_rate  = mean(pass$pass),
+    success       = pass,
+    success_count = sum(pass),
+    success_rate  = mean(pass),
     rep_out       = rep_out
   )
 }

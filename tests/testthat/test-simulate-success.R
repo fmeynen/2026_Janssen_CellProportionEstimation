@@ -41,6 +41,37 @@ test_that("multinomial success matches a direct recomputation from rep_out$max_e
   expect_equal(res$success_rate, mean(expected))
 })
 
+test_that("multinomial success matches replicate_success() on the old long-format construction", {
+  for (B in c(1L, 40L)) {
+    cfg   <- multinomial_config
+    cfg$B <- B
+    # Tight taus so that both pass and fail occur across replicates.
+    cfg$taus <- list(AE = 0.08, ARE = 0.5)
+    res <- simulate_success_at_n(alpha = 1, n = 20L, config = cfg, seed = 7)
+
+    phat    <- res$rep_out$phat
+    p       <- res$rep_out$inputs$p
+    grid <- expand.grid(
+      replicate = seq_len(nrow(phat)), cell_type = seq_along(p), metric = cfg$metrics,
+      KEEP.OUT.ATTRS = FALSE, stringsAsFactors = FALSE
+    )
+    person_results <- data.frame(
+      replicate                  = grid$replicate,
+      person_id                  = 1L,
+      cell_type                  = grid$cell_type,
+      metric                     = grid$metric,
+      observed_proportion        = phat[cbind(grid$replicate, grid$cell_type)],
+      population_mean_proportion = p[grid$cell_type],
+      stringsAsFactors = FALSE
+    )
+    old <- as.logical(replicate_success(person_results, cfg$taus)$pass)
+
+    expect_identical(res$success, old)
+    expect_identical(res$success_count, sum(old))
+    expect_equal(res$success_rate, mean(old))
+  }
+})
+
 test_that("dirichlet_multinomial success matches pooled_error_stat() on rep_out$phat", {
   res <- simulate_success_at_n(alpha = 1, n = 10L, config = dm_config, seed = 42)
 
