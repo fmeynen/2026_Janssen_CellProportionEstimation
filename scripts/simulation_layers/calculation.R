@@ -1,8 +1,6 @@
 # Calculation Layer -----------------------------------------------------------------------------------------------
-# Calculation layer: error metrics and threshold evaluation.
-# NOTE: the old iterative-GLM sample-size helpers (fit_success_glm,
-# solve_sample_size_from_glm, iterate_sample_size_for_alpha) have been moved to
-# scripts/deprecated/deprecated.R and are being replaced by a new solver below.
+# Calculation layer: error metrics (compute_errors), threshold evaluation and success rates,
+# the success rule (pooled-proportion statistic), and the sample-size solver.
 
 # Compute Errors --------------------------------------------------------------------------------------------------
 
