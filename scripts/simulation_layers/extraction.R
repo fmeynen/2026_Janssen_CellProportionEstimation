@@ -178,22 +178,21 @@ extract_success_rate <- function(result, taus) {
   replicate_pass <- replicate_success(person_results, taus)
   metrics <- sub("^pass_", "", setdiff(names(replicate_pass), c("scenario_id", "replicate", "pass")))
 
-  scenario_ids <- unique(replicate_pass$scenario_id)
-  summary_rows <- lapply(scenario_ids, function(id) {
-    rows <- replicate_pass[replicate_pass$scenario_id == id, , drop = FALSE]
-    out <- data.frame(
-      scenario_id = id,
-      B = nrow(rows),
-      success_count = sum(rows$pass),
-      success_rate = mean(rows$pass),
-      stringsAsFactors = FALSE
-    )
-    for (m in metrics) {
-      out[[paste0("success_rate_", m)]] <- mean(rows[[paste0("pass_", m)]])
-    }
-    out
-  })
-  summary <- do.call(rbind, summary_rows)
+  # One grouped pass: per-scenario sums of the pass columns (first-appearance order) divided by the replicate counts.
+  g <- factor(replicate_pass$scenario_id, levels = unique(replicate_pass$scenario_id))
+  pass_cols <- c("pass", paste0("pass_", metrics))
+  sums <- rowsum(as.matrix(replicate_pass[pass_cols]) * 1, g, reorder = FALSE)
+  B <- tabulate(g, nlevels(g))
+  summary <- data.frame(
+    scenario_id = levels(g),
+    B = B,
+    success_count = as.integer(sums[, "pass"]),
+    success_rate = sums[, "pass"] / B,
+    stringsAsFactors = FALSE
+  )
+  for (m in metrics) {
+    summary[[paste0("success_rate_", m)]] <- sums[, paste0("pass_", m)] / B
+  }
 
   scenario_cols <- c("scenario_id", "alpha", "p_max", "n_people", "concentration")
   out <- merge(result$p_table[, scenario_cols], summary, by = "scenario_id", sort = FALSE)
