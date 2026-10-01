@@ -32,7 +32,7 @@ max_error_summary <- function(error_vec, tie_method = c("random", "first", "last
 #' @param argmax  B x M integer matrix of argmax indices (from `run_replicates()`).
 #' @param p       True proportion vector (length K).
 #'
-#' @return Tidy data.frame with columns: metric, cell_type, count, fraction, p_value.
+#' @return Tidy data.frame with columns: metric, cell_type, count, fraction, true_proportion.
 summarize_argmax <- function(argmax, p) {
   validate_named_matrix(argmax, "argmax")
   K <- length(p)
@@ -42,11 +42,11 @@ summarize_argmax <- function(argmax, p) {
     m <- metrics[[i]]
     counts <- tabulate(argmax[, m], nbins = K)
     rows[[i]] <- data.frame(
-      metric    = m,
-      cell_type = seq_len(K),
-      count     = counts,
-      fraction  = counts / sum(counts),
-      p_value   = p,
+      metric          = m,
+      cell_type       = seq_len(K),
+      count           = counts,
+      fraction        = counts / sum(counts),
+      true_proportion = p,
       stringsAsFactors = FALSE
     )
   }
