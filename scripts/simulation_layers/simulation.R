@@ -16,8 +16,10 @@
 #' Unscaled weights: w = dbeta(grid, shape1 = alpha, shape2 = 1). The default grid avoids 0 and 1 so that all weights —
 #' and therefore all proportions — are strictly positive.
 generate_proportions_beta <- function(alpha, K = 10, grid = default_beta_grid(K)) {
-  stopifnot(is.numeric(alpha), length(alpha) == 1L, alpha > 0)
-  stopifnot(length(grid) == K)
+  validate_positive_numeric(alpha, "alpha")
+  if (length(grid) != K) {
+    stop("grid must have length K.", call. = FALSE)
+  }
   w <- dbeta(grid, shape1 = alpha, shape2 = 1)
   p <- normalize_to_simplex(w)
   validate_proportions(p)
@@ -35,7 +37,7 @@ generate_proportions_beta <- function(alpha, K = 10, grid = default_beta_grid(K)
 #' @return If `length(p_max) == 1`, a numeric vector of length K, all strictly positive, summing to 1, with a strictly
 #'         unique largest value at index K.
 #'         If `length(p_max) > 1`, a numeric matrix with one row per `p_max` value and K columns
-#'         (`index_1`, ..., `index_K`).
+#'         (`cell_type_1`, ..., `cell_type_K`).
 #'
 #' @details
 #' The first `K - 1` proportions are built from Beta(alpha, 1) weights, normalized and then rescaled to sum to
@@ -51,12 +53,7 @@ generate_props_fixed_max_beta <- function(alpha, K = 10, p_max,
   if (!is.numeric(K) || length(K) != 1L || !is.finite(K) || K %% 1 != 0 || K < 2L) {
     stop("K must be a single integer >= 2 for method = 'fixed_max_beta'.", call. = FALSE)
   }
-  if (is.null(p_max)) {
-    stop("p_max must be provided when method = 'fixed_max_beta'.", call. = FALSE)
-  }
-  if (!is.numeric(p_max) || any(!is.finite(p_max)) || any(p_max <= 0) || any(p_max >= 1)) {
-    stop("p_max must contain number(s) strictly between 0 and 1.", call. = FALSE)
-  }
+  validate_p_max(p_max, method_arg = "method")
   if (length(grid) != K - 1L) {
     stop("grid must have length K - 1 for method = 'fixed_max_beta'.", call. = FALSE)
   }
@@ -68,7 +65,7 @@ generate_props_fixed_max_beta <- function(alpha, K = 10, p_max,
       },
       FUN.VALUE = numeric(K)
     ))
-    colnames(p_mat) <- paste0("index_", seq_len(K))
+    colnames(p_mat) <- paste0("cell_type_", seq_len(K))
     rownames(p_mat) <- paste0("p_max_", seq_along(p_max), "_", format(p_max, trim = TRUE))
     return(p_mat)
   }
@@ -101,7 +98,7 @@ generate_props_fixed_max_beta <- function(alpha, K = 10, p_max,
 #' @return If `length(p_min) == 1`, a numeric vector of length K, all strictly positive, summing to 1, with a smallest
 #'         value at index 1 (ties with other indices allowed).
 #'         If `length(p_min) > 1`, a numeric matrix with one row per `p_min` value and K columns
-#'         (`index_1`, ..., `index_K`).
+#'         (`cell_type_1`, ..., `cell_type_K`).
 #'
 #' @details
 #' The last `K - 1` proportions are built from Beta(alpha, 1) weights, normalized and then rescaled to sum to
@@ -134,7 +131,7 @@ generate_props_fixed_min_beta <- function(alpha, K = 10, p_min,
       },
       FUN.VALUE = numeric(K)
     ))
-    colnames(p_mat) <- paste0("index_", seq_len(K))
+    colnames(p_mat) <- paste0("cell_type_", seq_len(K))
     rownames(p_mat) <- paste0("p_min_", seq_along(p_min), "_", format(p_min, trim = TRUE))
     return(p_mat)
   }
@@ -202,35 +199,13 @@ generate_proportions <- function(alpha, K = 10,
 #'
 #' @return Integer vector of length K summing to n.
 simulate_counts_multinomial <- function(p, n) {
-  stopifnot(is.numeric(p), all(p >= 0), abs(sum(p) - 1) < 1e-10)
-  stopifnot(is.numeric(n), length(n) == 1L, n >= 1L)
+  if (!is.numeric(p) || !isTRUE(all(p >= 0)) || !(abs(sum(p) - 1) < 1e-10)) {
+    stop("p must be a nonnegative numeric vector summing to 1.", call. = FALSE)
+  }
+  if (!is.numeric(n) || length(n) != 1L || !(n >= 1L)) {
+    stop("n must be a single number >= 1.", call. = FALSE)
+  }
   as.integer(rmultinom(1L, size = n, prob = p))
-}
-
-validate_positive_integer <- function(x, name, allow_vector = FALSE) {
-  valid_length <- if (allow_vector) length(x) >= 1L else length(x) == 1L
-  if (!is.numeric(x) || !valid_length || any(!is.finite(x)) || any(x < 1L) || any(x %% 1 != 0)) {
-    expected <- if (allow_vector) {
-      "a non-empty vector of positive integers"
-    } else {
-      "a positive integer"
-    }
-    stop(sprintf("%s must be %s.", name, expected), call. = FALSE)
-  }
-  as.integer(x)
-}
-
-validate_positive_numeric <- function(x, name, allow_vector = FALSE) {
-  valid_length <- if (allow_vector) length(x) >= 1L else length(x) == 1L
-  if (!is.numeric(x) || !valid_length || any(!is.finite(x)) || any(x <= 0)) {
-    expected <- if (allow_vector) {
-      "a non-empty vector of positive finite numbers"
-    } else {
-      "a single positive finite number"
-    }
-    stop(sprintf("%s must be %s.", name, expected), call. = FALSE)
-  }
-  as.numeric(x)
 }
 
 #' Draw one composition from a Dirichlet distribution.
@@ -332,7 +307,8 @@ simulate_counts <- function(p, n = NULL,
       concentration = concentration
     ),
     logistic_normal_multinomial = stop(
-      "model = 'logistic_normal_multinomial' is not yet implemented."
+      "model = 'logistic_normal_multinomial' is not yet implemented.",
+      call. = FALSE
     )
   )
 }
@@ -347,7 +323,12 @@ simulate_counts <- function(p, n = NULL,
 #'
 #' @return Numeric vector of observed proportions summing to 1.
 counts_to_proportions <- function(y, n = sum(y)) {
-  stopifnot(is.numeric(y) || is.integer(y), n > 0)
+  if (!is.numeric(y)) {
+    stop("y must be numeric.", call. = FALSE)
+  }
+  if (!isTRUE(all(n > 0))) {
+    stop("n must be > 0.", call. = FALSE)
+  }
   y / n
 }
 
@@ -368,7 +349,9 @@ counts_to_proportions <- function(y, n = sum(y)) {
 #' TSE = asinh(sqrt(2 * n^2 * (phat - p)^2))  (requires n)
 #' LAE = log(abs(phat - p))
 compute_errors <- function(phat, p, metrics = c("AE", "ARE"), n = NULL) {
-  stopifnot(length(phat) == length(p))
+  if (length(phat) != length(p)) {
+    stop("phat and p must have the same length.", call. = FALSE)
+  }
   if ("TSE" %in% metrics && is.null(n)) {
     stop("n must be provided when metric 'TSE' is requested.", call. = FALSE)
   }
@@ -410,6 +393,31 @@ replicate_cores <- function() {
   as.integer(cores)
 }
 
+#' Snapshot the global RNG kind and state, returning a function that restores them.
+#'
+#' Captures `RNGkind()` and `.Random.seed` (or its absence) in the global environment. Intended
+#' usage in a caller: `restore_rng <- save_rng_state(); on.exit(restore_rng(), add = TRUE)`. (The
+#' `on.exit()` must live in the caller, since it would otherwise fire when this helper returns.)
+#' The RNG kind is restored *before* `.Random.seed` is re-assigned: assigning `.Random.seed` while
+#' the active kind still differs re-derives/mutates the seed instead of reinstating it exactly. If
+#' no `.Random.seed` existed at snapshot time, any seed created since is removed.
+#'
+#' @return A zero-argument function that restores the snapshotted RNG kind and state.
+save_rng_state <- function() {
+  old_kind <- RNGkind()
+  has_old_seed <- exists(".Random.seed", envir = globalenv(), inherits = FALSE)
+  old_seed <- if (has_old_seed) get(".Random.seed", envir = globalenv()) else NULL
+  function() {
+    suppressWarnings(RNGkind(old_kind[[1L]], old_kind[[2L]], old_kind[[3L]]))
+    if (has_old_seed) {
+      assign(".Random.seed", old_seed, envir = globalenv())
+    } else if (exists(".Random.seed", envir = globalenv(), inherits = FALSE)) {
+      rm(".Random.seed", envir = globalenv())
+    }
+    invisible(NULL)
+  }
+}
+
 #' Build B independent, reproducible L'Ecuyer-CMRG RNG streams.
 #'
 #' Each returned element is a `.Random.seed` vector that, once installed as the active RNG state
@@ -440,19 +448,8 @@ replicate_streams <- function(seed, B) {
     seed <- sample.int(.Machine$integer.max, 1L)
   }
 
-  old_kind <- RNGkind()
-  has_old_seed <- exists(".Random.seed", envir = globalenv(), inherits = FALSE)
-  old_seed <- if (has_old_seed) get(".Random.seed", envir = globalenv()) else NULL
-  on.exit({
-    # RNGkind() must be restored *before* re-assigning .Random.seed: assigning .Random.seed while
-    # the active kind still differs re-derives/mutates the seed instead of reinstating it exactly.
-    suppressWarnings(RNGkind(old_kind[[1L]], old_kind[[2L]], old_kind[[3L]]))
-    if (has_old_seed) {
-      assign(".Random.seed", old_seed, envir = globalenv())
-    } else if (exists(".Random.seed", envir = globalenv(), inherits = FALSE)) {
-      rm(".Random.seed", envir = globalenv())
-    }
-  }, add = TRUE)
+  restore_rng <- save_rng_state()
+  on.exit(restore_rng(), add = TRUE)
 
   RNGkind("L'Ecuyer-CMRG")
   set.seed(seed)
@@ -524,19 +521,8 @@ check_replicate_results <- function(results) {
 #'
 #' @return A list of length `length(streams)`, in replicate order, of `FUN`'s return values.
 replicate_apply <- function(streams, FUN) {
-  old_kind <- RNGkind()
-  has_old_seed <- exists(".Random.seed", envir = globalenv(), inherits = FALSE)
-  old_seed <- if (has_old_seed) get(".Random.seed", envir = globalenv()) else NULL
-  on.exit({
-    # RNGkind() must be restored *before* re-assigning .Random.seed: assigning .Random.seed while
-    # the active kind still differs re-derives/mutates the seed instead of reinstating it exactly.
-    suppressWarnings(RNGkind(old_kind[[1L]], old_kind[[2L]], old_kind[[3L]]))
-    if (has_old_seed) {
-      assign(".Random.seed", old_seed, envir = globalenv())
-    } else if (exists(".Random.seed", envir = globalenv(), inherits = FALSE)) {
-      rm(".Random.seed", envir = globalenv())
-    }
-  }, add = TRUE)
+  restore_rng <- save_rng_state()
+  on.exit(restore_rng(), add = TRUE)
 
   RNGkind("L'Ecuyer-CMRG")
 
@@ -696,7 +682,12 @@ run_replicates <- function(p, n = NULL, B,
     stop("n must be provided for model = 'multinomial'.", call. = FALSE)
   }
   K <- length(p)
-  stopifnot(K >= 1L, B >= 1L)
+  if (K < 1L) {
+    stop("p must have length >= 1.", call. = FALSE)
+  }
+  if (!(B >= 1L)) {
+    stop("B must be >= 1.", call. = FALSE)
+  }
 
   max_errors <- matrix(NA_real_,    nrow = B, ncol = length(metrics),
                        dimnames = list(NULL, metrics))

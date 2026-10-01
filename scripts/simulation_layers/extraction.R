@@ -32,9 +32,9 @@ max_error_summary <- function(error_vec, tie_method = c("random", "first", "last
 #' @param argmax  B x M integer matrix of argmax indices (from `run_replicates()`).
 #' @param p       True proportion vector (length K).
 #'
-#' @return Tidy data.frame with columns: metric, index, count, fraction, p_value.
+#' @return Tidy data.frame with columns: metric, cell_type, count, fraction, p_value.
 summarize_argmax <- function(argmax, p) {
-  stopifnot(is.matrix(argmax), !is.null(colnames(argmax)))
+  validate_named_matrix(argmax, "argmax")
   K <- length(p)
   metrics <- colnames(argmax)
   rows <- vector("list", length(metrics))
@@ -42,11 +42,11 @@ summarize_argmax <- function(argmax, p) {
     m <- metrics[[i]]
     counts <- tabulate(argmax[, m], nbins = K)
     rows[[i]] <- data.frame(
-      metric   = m,
-      index    = seq_len(K),
-      count    = counts,
-      fraction = counts / sum(counts),
-      p_value  = p,
+      metric    = m,
+      cell_type = seq_len(K),
+      count     = counts,
+      fraction  = counts / sum(counts),
+      p_value   = p,
       stringsAsFactors = FALSE
     )
   }
@@ -60,15 +60,20 @@ summarize_argmax <- function(argmax, p) {
 #' @param p_max_i  Numeric scalar (or NA); the p_max value for this scenario.
 #' @param p        Numeric vector of length K; true proportions for this scenario.
 #' @param K        Integer; number of cell types.
+#' @param before   Optional named list of extra columns placed before `alpha`.
+#' @param after    Optional named list of extra columns placed between `p_max` and `cell_type_1`.
 #'
-#' @return A single-row data.frame with columns: alpha, p_max, index_1, ..., index_K.
-extract_p_table_row <- function(alpha_i, p_max_i, p, K) {
-  data.frame(
-    alpha = alpha_i,
-    p_max = p_max_i,
-    as.list(stats::setNames(as.numeric(p), paste0("index_", seq_len(K)))),
-    stringsAsFactors = FALSE,
-    check.names = FALSE
+#' @return A single-row data.frame with columns: [before], alpha, p_max, [after], cell_type_1, ..., cell_type_K.
+extract_p_table_row <- function(alpha_i, p_max_i, p, K, before = NULL, after = NULL) {
+  do.call(
+    data.frame,
+    c(
+      before,
+      list(alpha = alpha_i, p_max = p_max_i),
+      after,
+      as.list(stats::setNames(as.numeric(p), paste0("cell_type_", seq_len(K)))),
+      list(stringsAsFactors = FALSE, check.names = FALSE)
+    )
   )
 }
 
@@ -105,7 +110,7 @@ extract_replicate_summaries <- function(rep_out, alpha_i, p_max_i, B, metrics) {
 #' @param metrics  Character vector of metric names.
 #'
 #' @return Tidy data.frame with columns:
-#'   alpha, p_max, replicate, metric, index, error.
+#'   alpha, p_max, replicate, metric, cell_type, error.
 extract_errors_long <- function(rep_out, alpha_i, p_max_i, B, metrics) {
   errors_m_list <- vector("list", length(metrics))
   for (j in seq_along(metrics)) {
@@ -117,7 +122,7 @@ extract_errors_long <- function(rep_out, alpha_i, p_max_i, B, metrics) {
       p_max = p_max_i,
       replicate = rep(seq_len(B), times = ncol(errors_m)),
       metric = m,
-      index = rep(seq_len(ncol(errors_m)), each = B),
+      cell_type = rep(seq_len(ncol(errors_m)), each = B),
       error = as.vector(errors_m),
       stringsAsFactors = FALSE
     )
@@ -134,13 +139,13 @@ extract_errors_long <- function(rep_out, alpha_i, p_max_i, B, metrics) {
 #' @param B        Integer; number of replicates.
 #'
 #' @return Tidy data.frame with columns:
-#'   alpha, p_max, replicate, index, phat.
+#'   alpha, p_max, replicate, cell_type, phat.
 extract_phat_long <- function(rep_out, alpha_i, p_max_i, B) {
   data.frame(
     alpha = alpha_i,
     p_max = p_max_i,
     replicate = rep(seq_len(B), times = ncol(rep_out$phat)),
-    index = rep(seq_len(ncol(rep_out$phat)), each = B),
+    cell_type = rep(seq_len(ncol(rep_out$phat)), each = B),
     phat = as.vector(rep_out$phat),
     stringsAsFactors = FALSE
   )
@@ -188,16 +193,7 @@ success_rule_id <- function() {
 #' @return Data.frame with one row per (scenario_id, replicate), sorted by scenario_id then replicate, with
 #'   columns scenario_id, replicate, stat (max over cell types of the pooled-proportion error).
 replicate_pooled_error <- function(person_results, metric) {
-  required_cols <- c("replicate", "cell_type", "metric", "observed_proportion", "population_mean_proportion")
-  if (!is.data.frame(person_results) || !all(required_cols %in% names(person_results))) {
-    stop(
-      paste(
-        "person_results must be a data.frame with columns replicate, cell_type, metric, observed_proportion,",
-        "population_mean_proportion."
-      ),
-      call. = FALSE
-    )
-  }
+  validate_required_columns(person_results, person_results_required_cols)
   if (!is.character(metric) || length(metric) != 1L || is.na(metric)) {
     stop("metric must be a single character string.", call. = FALSE)
   }
@@ -299,16 +295,7 @@ replicate_pooled_error <- function(person_results, metric) {
 #'   scenario_id, replicate, `pass_<metric>` for each metric used, and `pass` (logical AND across all `pass_<metric>`
 #'   columns).
 replicate_success <- function(person_results, taus) {
-  required_cols <- c("replicate", "cell_type", "metric", "observed_proportion", "population_mean_proportion")
-  if (!is.data.frame(person_results) || !all(required_cols %in% names(person_results))) {
-    stop(
-      paste(
-        "person_results must be a data.frame with columns replicate, cell_type, metric, observed_proportion,",
-        "population_mean_proportion."
-      ),
-      call. = FALSE
-    )
-  }
+  validate_required_columns(person_results, person_results_required_cols)
   if (!is.list(taus) || is.null(names(taus)) || any(names(taus) == "")) {
     stop("taus must be a named list with one scalar threshold per metric.", call. = FALSE)
   }

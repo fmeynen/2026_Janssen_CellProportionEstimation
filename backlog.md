@@ -63,20 +63,25 @@ P1 pass done on branch `fix/p1-broken-code` (2026-10-01); all P1 items resolved,
 
 ## P3: Structure and consistency
 
-- [ ] **One way to load the layers.** There are currently three:
+- [x] **One way to load the layers.** There are currently three:
   - `list.files(pattern = "[.]R$")` in the testthat helper
   - `list.files()` without a pattern, copied into three drivers (would also source non-`.R` files)
   - the loader in the `.qmd`
 
   Preferred: make `simulation_layers/` a small package (a `DESCRIPTION` file plus an `R/` folder, loaded with
   `devtools::load_all()`). `R CMD check` would then flag undefined functions like those in P1.
-- [ ] **One cache helper.** The cache-or-compute pattern is written out three times, with different behaviour:
+  Resolved: added `scripts/load_layers.R` (sorted, `.R` files only), used by the three drivers and
+  `tests/testthat/helper-layers.R`. Package conversion not done; see the new item at the end of P3.
+- [x] **One cache helper.** The cache-or-compute pattern is written out three times, with different behaviour:
   - `errorchoice` hashes the whole config, so plot-only changes such as `cutoffs` trigger a re-simulation.
   - `dm_errorchoice` hashes only the simulation fields plus `success_rule_id()`.
 
   Introduce e.g. `cached_result(key, name, compute, cache, force_recompute, dir)` and pass only simulation-relevant fields
   in the key.
-- [ ] **Remove duplicated code:**
+  Resolved: `cached_result(key, name, compute, cache, force_recompute, dir)` in `orchestration.R`; `CACHE_SCHEMA`
+  (now 2) is always part of the hash. `errorchoice`, `dm_errorchoice` and `run_sample_size_experiment` key on the
+  simulation fields plus `success_rule_id()`. Stale cache files deleted.
+- [x] **Remove duplicated code:**
   - The RNG save/restore block in `replicate_streams` and `replicate_apply`
     ([simulation.R:369-381](scripts/simulation_layers/simulation.R#L369-L381),
     [:453-465](scripts/simulation_layers/simulation.R#L453-L465)).
@@ -87,23 +92,34 @@ P1 pass done on branch `fix/p1-broken-code` (2026-10-01); all P1 items resolved,
   - The `required_cols` check in `replicate_pooled_error` and `replicate_success`.
   - The scenario loop that skips impossible combinations, in `run_simulation_experiment` and
     `run_dirichlet_multinomial_experiment`.
-- [ ] **One validation style.** Currently mixed: bare `stopifnot`, named `stopifnot`, the `validate_*` helpers, inline
+  Resolved: added `save_rng_state()`, `validate_p_max()`, `validate_required_columns()` and `feasible_scenarios()`
+  (shared by both experiment runners); both orchestrators build p_table rows with `extract_p_table_row()` (new
+  `before`/`after` args).
+- [x] **One validation style.** Currently mixed: bare `stopifnot`, named `stopifnot`, the `validate_*` helpers, inline
   `if`/`stop`, and a local `is_scalar`. `evaluate_thresholds` is the only place that calls `stop()` without
   `call. = FALSE`.
-- [ ] **Align naming:**
+  Resolved: repeated checks use `validate_*` helpers in `validation_utils.R`; one-offs use
+  `if (...) stop(..., call. = FALSE)`; no `stopifnot` left. `is_scalar` replaced by `is_finite_scalar()`;
+  `validate_positive_integer`/`validate_positive_numeric` moved to `validation_utils.R`.
+- [x] **Align naming:**
   - Cell types are `index`/`index_k` in the multinomial outputs but `cell_type`/`cell_type_k` in the
     Dirichlet-multinomial outputs.
   - The header of `visualisation.R` says "Visualization Layer".
   - Folder names differ: `Simulations_Alemu/` vs `simulations/`, and `simResults_alemu` vs `simresults`.
-- [ ] **Align plot defaults.** `plot_success_vs_tau` defaults to `target = NULL` and draws a dashed line;
+  Resolved: `index`/`index_k` renamed to `cell_type`/`cell_type_k` everywhere (report PDFs not re-rendered);
+  `visualisation.R` header fixed; `scripts/Simulations_Alemu` moved to `scripts/external/alemu` and
+  `results/simResults_alemu` to `results/external/alemu`. `argmax_index` kept (the DM path has no argmax column).
+- [x] **Align plot defaults.** `plot_success_vs_tau` defaults to `target = NULL` and draws a dashed line;
   `plot_success_vs_n` defaults to `0.95`; `plot_success_rate_curve` draws a dotted line.
+  Resolved: all four success plots default to `target = 0.95` with a dotted line; `target = NULL` hides it.
+- [ ] **Consider packaging `simulation_layers/`.** Turning it into a package (`DESCRIPTION` plus `R/`, loaded with
+  `devtools::load_all()`) would let `R CMD check` flag undefined functions. Not done; `scripts/load_layers.R` covers loading.
 
 ## P4: Clarity
 
 - [ ] **Put functions in the right layer files:**
   - `compute_errors` is in `simulation.R`, but the header of `calculation.R` says it holds the error metrics.
   - The success rule (`replicate_pooled_error`, `replicate_success`, `success_rule_id`) is in `extraction.R`.
-  - `validate_positive_integer` and `validate_positive_numeric` are in `simulation.R`, not `validation_utils.R`.
 - [ ] **Remove the stale note** at [calculation.R:3-5](scripts/simulation_layers/calculation.R#L3-L5) (the solver
   replacement is done).
 - [ ] **Move the misplaced doc block.** The block at

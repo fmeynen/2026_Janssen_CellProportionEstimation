@@ -41,6 +41,42 @@ simulation_result_path <- function(config, dir, name) {
   file.path(dir, paste0(name, "_", hash_config(config), ".rds"))
 }
 
+
+# Schema version of cached results. Bump this whenever the shape of a cached result changes (columns, list elements,
+# types), so that stale files on disk are never read back as if they had the new shape.
+CACHE_SCHEMA <- 2L
+
+
+#' Return a cached result, or compute it and cache it.
+#'
+#' The cache file is `simulation_result_path(c(key, list(cache_schema = CACHE_SCHEMA)), dir, name)`. Callers should
+#' pass only the fields that influence the computed result in `key`, so that e.g. plotting-only settings never
+#' trigger a recomputation.
+#'
+#' @param key             Named list of the simulation-relevant inputs that identify the result.
+#' @param name            Short label prefixed to the file name (e.g. `"errorchoice"`).
+#' @param compute         Zero-argument function returning the result to cache.
+#' @param cache           Logical; read/write the `.rds` cache file under `dir`. If `FALSE`, always computes and
+#'   never touches the disk.
+#' @param force_recompute Logical; ignore an existing cache file and recompute (still writes the new result when
+#'   `cache` is `TRUE`).
+#' @param dir             Directory holding the cache files. Created automatically if it does not yet exist.
+#'
+#' @return The cached or freshly computed result.
+cached_result <- function(key, name, compute, cache = TRUE, force_recompute = FALSE, dir) {
+  result_file <- simulation_result_path(c(key, list(cache_schema = CACHE_SCHEMA)), dir, name)
+
+  if (cache && !force_recompute && file.exists(result_file)) {
+    return(readRDS(result_file))
+  }
+
+  result <- compute()
+  if (cache) {
+    saveRDS(result, result_file)
+  }
+  result
+}
+
 #' Run the sample-size solver over a grid of alphas with warm start and per-alpha caching.
 #'
 #' For each alpha in `config$alpha`, in the given order, runs `estimate_sample_size()` to find the smallest sample
@@ -92,25 +128,39 @@ run_sample_size_experiment <- function(
     alpha_config <- config
     alpha_config$alpha <- alpha_i
     alpha_config$n_init <- n_init
-    result_file <- simulation_result_path(
-      c(alpha_config, list(success_rule = success_rule_id())),
-      cache_dir,
-      "sample_size"
+    # Only the fields read by estimate_sample_size() / simulate_success_at_n() go into the cache key.
+    key <- list(
+      alpha = alpha_i,
+      n_init = n_init,
+      success_rate_target = config$success_rate_target,
+      rel_tol = config$rel_tol,
+      max_iterations = config$max_iterations,
+      f0 = config$f0,
+      f_floor = config$f_floor,
+      n_max = config$n_max,
+      B = config$B,
+      seed = config$seed,
+      K = config$K,
+      taus = config$taus,
+      metrics = config$metrics,
+      model = config$model,
+      tie_method = config$tie_method,
+      proportion_method = config$proportion_method,
+      p_max = config$p_max,
+      n_people = config$n_people,
+      concentration = config$concentration,
+      success_rule = success_rule_id()
     )
-
-    if (cache && !force_recompute && file.exists(result_file)) {
-      alpha_result <- readRDS(result_file)
-    } else {
-      alpha_result <- estimate_sample_size(
-        alpha_i,
-        n_init,
-        alpha_config,
-        simulate = simulate
-      )
-      if (cache) {
-        saveRDS(alpha_result, result_file)
-      }
-    }
+    alpha_result <- cached_result(
+      key = key,
+      name = "sample_size",
+      compute = function() {
+        estimate_sample_size(alpha_i, n_init, alpha_config, simulate = simulate)
+      },
+      cache = cache,
+      force_recompute = force_recompute,
+      dir = cache_dir
+    )
 
     sample_size_rows[[i]] <- data.frame(
       alpha = alpha_i,
@@ -131,6 +181,68 @@ run_sample_size_experiment <- function(
 
 
 # Run individual experiments --------------------------------------------------------------------------------------
+#' Generate true proportions for every alpha x p_max scenario, skipping impossible fixed-max combinations.
+#'
+#' Validates `p_max` (for `proportion_method = "fixed_max_beta"`), builds the alpha x p_max grid (alpha varies
+#' fastest) and calls `generate_proportions()` once per row. `generate_proportions()` is RNG-free, so calling it
+#' up front does not change any random draws made later by the simulation. When several `p_max` values are given,
+#' impossible fixed-max combinations are skipped (`generate_props_fixed_max_beta()` warns once per combination);
+#' otherwise the error is propagated. Stops if no combination is feasible.
+#'
+#' @return A list with `grid` (data.frame with `alpha`, `p_max` (NA unless fixed-max), `population_id`),
+#'   `p` (list of proportion vectors, one per grid row; NULL for skipped rows) and `feasible` (logical vector).
+feasible_scenarios <- function(alpha, K, proportion_method, p_max) {
+  if (identical(proportion_method, "fixed_max_beta")) {
+    validate_p_max(p_max)
+    p_max_values <- as.numeric(p_max)
+  } else {
+    p_max_values <- NA_real_
+  }
+
+  grid <- expand.grid(
+    alpha = alpha,
+    p_max = p_max_values,
+    KEEP.OUT.ATTRS = FALSE,
+    stringsAsFactors = FALSE
+  )
+  grid$population_id <- seq_len(nrow(grid))
+
+  skip_impossible <- identical(proportion_method, "fixed_max_beta") &&
+    length(p_max_values) > 1L
+
+  p_list <- vector("list", nrow(grid))
+  for (i in seq_len(nrow(grid))) {
+    p_max_i <- grid$p_max[[i]]
+    p <- tryCatch(
+      generate_proportions(
+        alpha = grid$alpha[[i]],
+        K = K,
+        method = proportion_method,
+        p_max = if (is.na(p_max_i)) NULL else p_max_i
+      ),
+      error = function(e) {
+        if (skip_impossible && inherits(e, "impossible_fixed_max_error")) {
+          return(NULL)
+        }
+        stop(e)
+      }
+    )
+    if (!is.null(p)) {
+      p_list[[i]] <- p
+    }
+  }
+
+  feasible <- !vapply(p_list, is.null, logical(1L))
+  if (!any(feasible)) {
+    stop(
+      "No feasible alpha/p_max combinations produced simulation output.",
+      call. = FALSE
+    )
+  }
+  list(grid = grid, p = p_list, feasible = feasible)
+}
+
+
 run_dirichlet_multinomial_experiment <- function(
   alpha,
   K,
@@ -155,35 +267,8 @@ run_dirichlet_multinomial_experiment <- function(
     allow_vector = TRUE
   )
 
-  if (identical(proportion_method, "fixed_max_beta")) {
-    if (is.null(p_max)) {
-      stop(
-        "p_max must be provided when proportion_method = 'fixed_max_beta'.",
-        call. = FALSE
-      )
-    }
-    if (
-      !is.numeric(p_max) ||
-        any(!is.finite(p_max)) ||
-        any(p_max <= 0) ||
-        any(p_max >= 1)
-    ) {
-      stop(
-        "p_max must contain numbers strictly between 0 and 1.",
-        call. = FALSE
-      )
-    }
-    p_max_values <- as.numeric(p_max)
-  } else {
-    p_max_values <- NA_real_
-  }
-
-  population_scenarios <- expand.grid(
-    alpha = alpha,
-    p_max = p_max_values,
-    KEEP.OUT.ATTRS = FALSE,
-    stringsAsFactors = FALSE
-  )
+  feasible <- feasible_scenarios(alpha, K, proportion_method, p_max)
+  population_scenarios <- feasible$grid
   person_scenarios <- expand.grid(
     n_people = n_people,
     concentration = concentration,
@@ -201,55 +286,10 @@ run_dirichlet_multinomial_experiment <- function(
   p_table_list <- vector("list", nrow(scenario_grid))
   person_results_list <- vector("list", nrow(scenario_grid))
   keep <- logical(nrow(scenario_grid))
-  population_compositions <- list()
-  impossible_population_keys <- character()
-  skip_impossible <- identical(proportion_method, "fixed_max_beta") &&
-    length(p_max_values) > 1L
 
   for (i in seq_len(nrow(scenario_grid))) {
     scenario <- scenario_grid[i, , drop = FALSE]
-    population_key <- paste(
-      format(scenario$alpha[[1L]], scientific = FALSE, trim = TRUE),
-      if (is.na(scenario$p_max[[1L]])) {
-        "NA"
-      } else {
-        format(scenario$p_max[[1L]], scientific = FALSE, trim = TRUE)
-      },
-      sep = "__"
-    )
-    if (population_key %in% impossible_population_keys) {
-      next
-    }
-    p <- population_compositions[[population_key]]
-    if (is.null(p)) {
-      p <- tryCatch(
-        generate_proportions(
-          alpha = scenario$alpha[[1L]],
-          K = K,
-          method = proportion_method,
-          p_max = if (is.na(scenario$p_max[[1L]])) {
-            NULL
-          } else {
-            scenario$p_max[[1L]]
-          }
-        ),
-        error = function(e) {
-          if (skip_impossible && inherits(e, "impossible_fixed_max_error")) {
-            return(NULL)
-          }
-          stop(e)
-        }
-      )
-      if (!is.null(p)) {
-        population_compositions[[population_key]] <- p
-      }
-    }
-    if (is.null(p)) {
-      impossible_population_keys <- c(
-        impossible_population_keys,
-        population_key
-      )
-    }
+    p <- feasible$p[[scenario$population_id[[1L]]]]
     if (is.null(p)) {
       next
     }
@@ -284,24 +324,18 @@ run_dirichlet_multinomial_experiment <- function(
       "population_mean_proportion",
       "error"
     )]
-    p_table_list[[i]] <- data.frame(
-      scenario_id = scenario$scenario_id[[1L]],
-      alpha = scenario$alpha[[1L]],
-      p_max = scenario$p_max[[1L]],
-      n_people = scenario$n_people[[1L]],
-      concentration = scenario$concentration[[1L]],
-      as.list(stats::setNames(as.numeric(p), paste0("index_", seq_len(K)))),
-      stringsAsFactors = FALSE,
-      check.names = FALSE
+    p_table_list[[i]] <- extract_p_table_row(
+      scenario$alpha[[1L]],
+      scenario$p_max[[1L]],
+      p,
+      K,
+      before = list(scenario_id = scenario$scenario_id[[1L]]),
+      after = list(
+        n_people = scenario$n_people[[1L]],
+        concentration = scenario$concentration[[1L]]
+      )
     )
     keep[[i]] <- TRUE
-  }
-
-  if (!any(keep)) {
-    stop(
-      "No feasible alpha/p_max combinations produced simulation output.",
-      call. = FALSE
-    )
   }
 
   list(
@@ -357,7 +391,7 @@ run_dirichlet_multinomial_experiment <- function(
 #'   \describe{
 #'     \item{inputs}{All input arguments (`alpha`, `K`, `B`, `metrics`, `proportion_method`, `n_people`,
 #'       `n_per_person`, `concentration`, `seed`).}
-#'     \item{p_table}{Data.frame with one row per alpha and columns `alpha`, `index_1`, ..., `index_K`.}
+#'     \item{p_table}{Data.frame with one row per alpha and columns `alpha`, `cell_type_1`, ..., `cell_type_K`.}
 #'     \item{stats}{Data.frame with one row per (alpha, n_people, n_per_person, metric, replicate) and columns
 #'       `alpha`, `n_people`, `concentration`, `n_per_person`, `metric`, `replicate`, `stat`.}
 #'   }
@@ -450,7 +484,7 @@ run_dm_errorchoice_experiment <- function(
   p_table_list <- lapply(seq_along(alpha), function(i) {
     data.frame(
       alpha = alpha[[i]],
-      as.list(stats::setNames(as.numeric(p_list[[i]]), paste0("index_", seq_len(K)))),
+      as.list(stats::setNames(as.numeric(p_list[[i]]), paste0("cell_type_", seq_len(K)))),
       stringsAsFactors = FALSE,
       check.names = FALSE
     )
@@ -509,18 +543,18 @@ run_dm_errorchoice_experiment <- function(
 #'   \describe{
 #'     \item{inputs}{All input arguments.}
 #'     \item{p_table}{Data.frame with one row per simulated alpha/p_max combination,
-#'       an `alpha` column, a `p_max` column, and one column per index
-#'       (`index_1`, ..., `index_K`) containing the corresponding p values.}
+#'       an `alpha` column, a `p_max` column, and one column per cell type
+#'       (`cell_type_1`, ..., `cell_type_K`) containing the corresponding p values.}
 #'     \item{replicate_summaries}{Tidy data.frame:
 #'       alpha, p_max, replicate, metric, max_error, argmax_index.}
 #'     \item{errors_long}{Tidy data.frame:
-#'       alpha, p_max, replicate, metric, index, error.}
+#'       alpha, p_max, replicate, metric, cell_type, error.}
 #'     \item{phat_long}{Tidy data.frame:
-#'       alpha, p_max, replicate, index, phat.}
+#'       alpha, p_max, replicate, cell_type, phat.}
 #'     \item{curves}{Tidy data.frame:
 #'       alpha, p_max, metric, tau, success_rate, mean_n_above.}
 #'     \item{argmax_summary}{Tidy data.frame:
-#'       alpha, p_max, metric, index, count, fraction, p_value.}
+#'       alpha, p_max, metric, cell_type, count, fraction, p_value.}
 #'   }
 run_simulation_experiment <- function(
   alpha,
@@ -539,7 +573,7 @@ run_simulation_experiment <- function(
   concentration = NULL,
   ...
 ) {
-  stopifnot(is.numeric(alpha), length(alpha) >= 1L, all(alpha > 0))
+  validate_positive_numeric(alpha, "alpha", allow_vector = TRUE)
   model <- match.arg(model, c("multinomial", "dirichlet_multinomial"))
 
   if (identical(model, "dirichlet_multinomial")) {
@@ -560,35 +594,8 @@ run_simulation_experiment <- function(
     stop("n must be provided for model = 'multinomial'.", call. = FALSE)
   }
 
-  if (identical(proportion_method, "fixed_max_beta")) {
-    if (is.null(p_max)) {
-      stop(
-        "p_max must be provided when proportion_method = 'fixed_max_beta'.",
-        call. = FALSE
-      )
-    }
-    if (
-      !is.numeric(p_max) ||
-        any(!is.finite(p_max)) ||
-        any(p_max <= 0) ||
-        any(p_max >= 1)
-    ) {
-      stop(
-        "p_max must contain numbers strictly between 0 and 1.",
-        call. = FALSE
-      )
-    }
-    p_max_values <- as.numeric(p_max)
-  } else {
-    p_max_values <- NA_real_
-  }
-
-  combinations <- expand.grid(
-    alpha = alpha,
-    p_max = p_max_values,
-    KEEP.OUT.ATTRS = FALSE,
-    stringsAsFactors = FALSE
-  )
+  feasible <- feasible_scenarios(alpha, K, proportion_method, p_max)
+  combinations <- feasible$grid
   n_combinations <- nrow(combinations)
   p_table_list <- vector("list", n_combinations)
   replicate_summaries_list <- vector("list", n_combinations)
@@ -597,36 +604,15 @@ run_simulation_experiment <- function(
   curves_list <- vector("list", n_combinations)
   argmax_summary_list <- vector("list", n_combinations)
   keep <- logical(n_combinations)
-  should_skip_impossible_combinations <- identical(
-    proportion_method,
-    "fixed_max_beta"
-  ) &&
-    length(p_max_values) > 1L
 
   for (i in seq_len(n_combinations)) {
     alpha_i <- combinations$alpha[[i]]
     p_max_i <- combinations$p_max[[i]]
     seed_i <- if (is.null(seed)) NULL else seed + i - 1L
-    p <- tryCatch(
-      generate_proportions(
-        alpha = alpha_i,
-        K = K,
-        method = proportion_method,
-        p_max = if (is.na(p_max_i)) NULL else p_max_i
-      ),
-      error = function(e) {
-        if (
-          should_skip_impossible_combinations &&
-            inherits(e, "impossible_fixed_max_error")
-        ) {
-          return(NULL)
-        }
-        stop(e)
-      }
-    )
+    p <- feasible$p[[i]]
     if (is.null(p)) {
       next
-    } # Skip impossible alpha/p_max combinations caught by the error handler.
+    } # Skip impossible alpha/p_max combinations (already warned in feasible_scenarios()).
 
     rep_out <- run_replicates(
       p,
@@ -683,18 +669,11 @@ run_simulation_experiment <- function(
       "alpha",
       "p_max",
       "metric",
-      "index",
+      "cell_type",
       "count",
       "fraction",
       "p_value"
     )]
-  }
-
-  if (!any(keep)) {
-    stop(
-      "No feasible alpha/p_max combinations produced simulation output.",
-      call. = FALSE
-    )
   }
 
   p_table_list <- p_table_list[keep]

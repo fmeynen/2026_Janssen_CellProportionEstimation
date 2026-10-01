@@ -1,5 +1,5 @@
 
-# Visualization Layer ---------------------------------------------------------------------------------------------
+# Visualisation Layer ---------------------------------------------------------------------------------------------
 
 # Visualisation layer: plotting functions for simulation results.
 #
@@ -13,11 +13,7 @@
 #' @return A ggplot object. For Beta proportions, facets are by alpha.
 #'    For fixed-max Beta proportions,facets are by p_max (rows) and alpha (columns).
 plot_proportions_curve <- function(result) {
-  stopifnot(
-    "result must be a list" = is.list(result),
-    "result must contain inputs" = "inputs" %in% names(result),
-    "result must contain p_table" = "p_table" %in% names(result)
-  )
+  validate_result_fields(result, c("inputs", "p_table"))
   if (!("proportion_method" %in% names(result$inputs))) {
     stop("result$inputs must contain proportion_method.", call. = FALSE)
   }
@@ -26,9 +22,9 @@ plot_proportions_curve <- function(result) {
   if (!is.data.frame(p_table) || nrow(p_table) == 0L) {
     stop("result$p_table must be a non-empty data.frame.", call. = FALSE)
   }
-  index_cols <- grep("^index_", names(p_table), value = TRUE)
-  if (length(index_cols) == 0L) {
-    stop("result$p_table must contain index_1 ... index_K columns.", call. = FALSE)
+  cell_type_cols <- grep("^cell_type_", names(p_table), value = TRUE)
+  if (length(cell_type_cols) == 0L) {
+    stop("result$p_table must contain cell_type_1 ... cell_type_K columns.", call. = FALSE)
   }
   if (!("alpha" %in% names(p_table))) {
     stop("result$p_table must contain an alpha column.", call. = FALSE)
@@ -39,7 +35,7 @@ plot_proportions_curve <- function(result) {
     stop("Unsupported proportion_method in result$inputs.", call. = FALSE)
   }
 
-  K <- length(index_cols)
+  K <- length(cell_type_cols)
   n_rows <- nrow(p_table)
   curve_rows <- vector("list", n_rows)
   point_rows <- vector("list", n_rows)
@@ -50,7 +46,7 @@ plot_proportions_curve <- function(result) {
 
   for (i in seq_len(n_rows)) {
     alpha_i <- as.numeric(p_table$alpha[[i]])
-    p_i <- as.numeric(p_table[i, index_cols, drop = FALSE])
+    p_i <- as.numeric(p_table[i, cell_type_cols, drop = FALSE])
     p_max_i <- if ("p_max" %in% names(p_table)) as.numeric(p_table$p_max[[i]]) else NA_real_
 
     if (identical(method, "beta")) {
@@ -130,12 +126,13 @@ plot_proportions_curve <- function(result) {
 #' @param metric  Character scalar. If NULL, plot all metrics (faceted).
 #' @param alphas  Optional numeric vector; subset of alpha values to plot.
 #' @param p_maxs  Optional numeric vector; subset of p_max values to plot.
-#' @param target  Success-rate reference line drawn as a horizontal dotted line (default 0.95).
+#' @param target  Success-rate reference line drawn as a horizontal dotted line (default 0.95);
+#'   `NULL` hides the line.
 #'
 #' @return A ggplot object.
 plot_success_rate_curve <- function(result, metric = NULL, alphas = NULL,
                                     p_maxs = NULL, target = 0.95) {
-  stopifnot(is.list(result), "curves" %in% names(result))
+  validate_result_fields(result, "curves")
   df <- result$curves
   if (!is.null(metric)) {
     df <- df[df$metric %in% metric, , drop = FALSE]
@@ -164,7 +161,6 @@ plot_success_rate_curve <- function(result, metric = NULL, alphas = NULL,
 
   p <- ggplot2::ggplot(df, aes_mapping) +
     ggplot2::geom_line() +
-    ggplot2::geom_hline(yintercept = target, linetype = "dotted") +
     ggplot2::labs(
       x     = "Threshold (tau)",
       y     = "Success rate",
@@ -172,6 +168,9 @@ plot_success_rate_curve <- function(result, metric = NULL, alphas = NULL,
       title = "Success-rate curve(s)"
     ) +
     ggplot2::theme_bw()
+  if (!is.null(target)) {
+    p <- p + ggplot2::geom_hline(yintercept = target, linetype = "dotted")
+  }
   if (has_p_max) {
     p <- p + ggplot2::labs(linetype = "p_max")
   }
@@ -190,10 +189,7 @@ plot_success_rate_curve <- function(result, metric = NULL, alphas = NULL,
 #'
 #' @return A ggplot object.
 plot_argmax_histogram <- function(result, metric, alphas = NULL, p_maxs = NULL) {
-  stopifnot(
-    "result must be a list" = is.list(result),
-    "result must contain replicate_summaries" = "replicate_summaries" %in% names(result)
-  )
+  validate_result_fields(result, "replicate_summaries")
   df <- result$replicate_summaries
   metric_is_scalar_character <- is.character(metric) && length(metric) == 1L && !is.na(metric)
   metric_is_supported <- metric_is_scalar_character && metric %in% c("AE", "ARE", "TSE", "LAE")
@@ -238,10 +234,20 @@ plot_argmax_histogram <- function(result, metric, alphas = NULL, p_maxs = NULL) 
   argmax_plot
 }
 
-plot_success_rate_vs_n <- function(result, target = NULL, smooth = FALSE) {
+#' Plot success rate against sample size.
+#'
+#' @param result  Output list with a `curves` data.frame, or such a data.frame directly (columns
+#'   `alpha`, `n`, `success_rate`).
+#' @param target  Success-rate reference line drawn as a horizontal dotted line (default 0.95). If
+#'   not supplied and `result$inputs$success_rate_target` exists, that value is used. Pass `NULL`
+#'   to hide the line.
+#' @param smooth  Logical; draw a smoothed curve instead of a line.
+#'
+#' @return A ggplot object.
+plot_success_rate_vs_n <- function(result, target = 0.95, smooth = FALSE) {
   if (is.list(result) && "curves" %in% names(result)) {
     df <- result$curves
-    if (is.null(target) && "inputs" %in% names(result) && "success_rate_target" %in% names(result$inputs)) {
+    if (missing(target) && "inputs" %in% names(result) && "success_rate_target" %in% names(result$inputs)) {
       target <- result$inputs$success_rate_target
     }
   } else {
@@ -298,11 +304,11 @@ plot_success_rate_vs_n <- function(result, target = NULL, smooth = FALSE) {
 #'   `"ARE"`).
 #' @param subtitle   Optional character scalar; passed through to `labs()`
 #'   (e.g. to state the fixed `n_per_person`).
-#' @param target     Optional numeric scalar; if supplied, draws a dashed
-#'   horizontal reference line at this success rate.
+#' @param target     Numeric scalar (default `0.95`); if non-`NULL`, draws a
+#'   dotted horizontal reference line at this success rate.
 #'
 #' @return A ggplot object.
-plot_success_vs_tau <- function(curves_tau, metric, subtitle = NULL, target = NULL) {
+plot_success_vs_tau <- function(curves_tau, metric, subtitle = NULL, target = 0.95) {
   if (!is.data.frame(curves_tau)) {
     stop("curves_tau must be a data.frame.", call. = FALSE)
   }
@@ -347,7 +353,7 @@ plot_success_vs_tau <- function(curves_tau, metric, subtitle = NULL, target = NU
     ggplot2::theme_bw()
 
   if (!is.null(target)) {
-    p <- p + ggplot2::geom_hline(yintercept = target, linetype = "dashed")
+    p <- p + ggplot2::geom_hline(yintercept = target, linetype = "dotted")
   }
 
   p
@@ -366,7 +372,7 @@ plot_success_vs_tau <- function(curves_tau, metric, subtitle = NULL, target = NU
 #' @param subtitle  Optional character scalar; passed through to `labs()`
 #'   (e.g. to state the fixed `tau`).
 #' @param target    Numeric scalar (default `0.95`); if non-`NULL`, draws a
-#'   dashed horizontal reference line at this success rate.
+#'   dotted horizontal reference line at this success rate.
 #'
 #' @return A ggplot object.
 plot_success_vs_n <- function(curves_n, metric, subtitle = NULL, target = 0.95) {
@@ -415,7 +421,7 @@ plot_success_vs_n <- function(curves_n, metric, subtitle = NULL, target = 0.95) 
     ggplot2::theme_bw()
 
   if (!is.null(target)) {
-    p <- p + ggplot2::geom_hline(yintercept = target, linetype = "dashed")
+    p <- p + ggplot2::geom_hline(yintercept = target, linetype = "dotted")
   }
 
   p

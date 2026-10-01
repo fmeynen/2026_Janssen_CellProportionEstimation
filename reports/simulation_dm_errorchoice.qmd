@@ -36,7 +36,7 @@ n_grid <- config$n_per_person_grid
 N_max <- max(config$n_people)
 alpha_max <- max(config$alpha)
 
-p_mat <- as.matrix(result$p_table[, paste0("index_", seq_len(K))])
+p_mat <- as.matrix(result$p_table[, paste0("cell_type_", seq_len(K))])
 rownames(p_mat) <- result$p_table$alpha
 
 # Analytic variance components of (pbar_j - p_j), see @eq-var-total.
@@ -193,7 +193,7 @@ At the simulated concentration $c = `r format(c_conc, big.mark = ",", scientific
 
 ```{r}
 #| label: fig-tau-ae
-#| fig-cap: !expr 'sprintf("AE success rate versus threshold $\\tau_{AE}$ at %s cells per person. One panel per $\\alpha$, one colour per number of people $N$; the dashed line marks the %s%% target.", format(n_fixed, big.mark = ",", scientific = FALSE), 100 * config$target)'
+#| fig-cap: !expr 'sprintf("AE success rate versus threshold $\\tau_{AE}$ at %s cells per person. One panel per $\\alpha$, one colour per number of people $N$; the dotted line marks the %s%% target.", format(n_fixed, big.mark = ",", scientific = FALSE), 100 * config$target)'
 #| fig-alt: "Four panels, one per alpha, showing the AE success rate vs the threshold."
 
 plot_success_vs_tau(

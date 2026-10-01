@@ -19,13 +19,19 @@
 #'
 #' @return Tidy data.frame with columns: metric, tau, success_rate, mean_n_above.
 evaluate_thresholds <- function(max_errors, taus, errors = NULL) {
-  stopifnot(is.matrix(max_errors), !is.null(colnames(max_errors)))
+  validate_named_matrix(max_errors, "max_errors")
   metrics <- colnames(max_errors)
   has_error_array <- !is.null(errors)
   if (has_error_array) {
-    stopifnot(length(dim(errors)) == 3L)
-    stopifnot(dim(errors)[1] == nrow(max_errors))
-    stopifnot(dim(errors)[3] == length(metrics))
+    if (length(dim(errors)) != 3L) {
+      stop("errors must be a 3-dimensional array.", call. = FALSE)
+    }
+    if (dim(errors)[1] != nrow(max_errors)) {
+      stop("errors must have the same number of replicates (first dimension) as max_errors has rows.", call. = FALSE)
+    }
+    if (dim(errors)[3] != length(metrics)) {
+      stop("errors must have one slice (third dimension) per column of max_errors.", call. = FALSE)
+    }
   }
 
   # Normalise taus: plain vector -> same grid for all metrics;
@@ -35,14 +41,17 @@ evaluate_thresholds <- function(max_errors, taus, errors = NULL) {
   } else if (is.list(taus)) {
     missing_metrics <- setdiff(metrics, names(taus))
     if (length(missing_metrics) > 0L) {
-      stop(sprintf(
-        "`taus` list is missing entries for metric(s): %s",
-        paste(missing_metrics, collapse = ", ")
-      ))
+      stop(
+        sprintf(
+          "`taus` list is missing entries for metric(s): %s",
+          paste(missing_metrics, collapse = ", ")
+        ),
+        call. = FALSE
+      )
     }
     taus_list <- taus[metrics]
   } else {
-    stop("`taus` must be a numeric vector or a named list of numeric vectors.")
+    stop("`taus` must be a numeric vector or a named list of numeric vectors.", call. = FALSE)
   }
 
   rows <- vector("list", length(metrics))
@@ -149,20 +158,13 @@ default_tau_grid <- function(stat, n_points = 200, prob = 0.999) {
 #'
 #' @return Sorted, unique integer vector of pilot sizes, each rounded up and within `[1, n_max]`.
 sample_size_pilots <- function(n, f, n_max = 1e9) {
-  stopifnot(
-    is.numeric(n),
-    length(n) == 1L,
-    is.finite(n),
-    n > 0,
-    is.numeric(f),
-    length(f) == 1L,
-    is.finite(f),
-    f > 1,
-    is.numeric(n_max),
-    length(n_max) == 1L,
-    n_max >= 1,
-    n_max <= .Machine$integer.max
-  )
+  if (!is_finite_scalar(n) || n <= 0) {
+    stop("n must be a single finite number > 0.", call. = FALSE)
+  }
+  if (!is_finite_scalar(f) || f <= 1) {
+    stop("f must be a single finite number > 1.", call. = FALSE)
+  }
+  validate_n_max(n_max)
   sort(unique(as.integer(pmin(n_max, pmax(1, ceiling(c(n / f, n, n * f)))))))
 }
 
@@ -180,18 +182,18 @@ sample_size_pilots <- function(n, f, n_max = 1e9) {
 #'
 #' @return The fitted `glm` object.
 fit_success_curve <- function(n_values, success_count, B) {
-  stopifnot(
-    is.numeric(n_values),
-    length(n_values) >= 1L,
-    all(n_values >= 1),
-    is.numeric(success_count),
-    length(success_count) == length(n_values),
-    is.numeric(B),
-    length(B) == 1L,
-    B >= 1,
-    all(success_count >= 0),
-    all(success_count <= B)
-  )
+  if (!is.numeric(n_values) || length(n_values) < 1L || !isTRUE(all(n_values >= 1))) {
+    stop("n_values must be a non-empty numeric vector of values >= 1.", call. = FALSE)
+  }
+  if (!is.numeric(success_count) || length(success_count) != length(n_values)) {
+    stop("success_count must be a numeric vector with the same length as n_values.", call. = FALSE)
+  }
+  if (!is_finite_scalar(B) || B < 1) {
+    stop("B must be a single number >= 1.", call. = FALSE)
+  }
+  if (!isTRUE(all(success_count >= 0)) || !isTRUE(all(success_count <= B))) {
+    stop("success_count must lie between 0 and B.", call. = FALSE)
+  }
   dat <- data.frame(n = n_values, s = success_count, fails = B - success_count)
   withCallingHandlers(
     stats::glm(
@@ -224,10 +226,8 @@ fit_success_curve <- function(n_values, success_count, B) {
 #'
 #' @return Integer n, rounded up, within `[1, n_max]`.
 solve_success_curve <- function(fit, target, n_max = 1e9) {
-  stopifnot(
-    is.numeric(target), length(target) == 1L, target > 0, target < 1,
-    is.numeric(n_max), length(n_max) == 1L, n_max >= 1, n_max <= .Machine$integer.max
-  )
+  validate_open_unit_scalar(target, "target")
+  validate_n_max(n_max)
   coefs <- stats::coef(fit)
   intercept <- unname(coefs[[1L]])
   slope <- unname(coefs[[2L]])
@@ -287,13 +287,12 @@ estimate_sample_size <- function(
   config,
   simulate = simulate_success_at_n
 ) {
-  stopifnot(
-    is.numeric(n_init),
-    length(n_init) == 1L,
-    is.finite(n_init),
-    n_init >= 1,
-    is.function(simulate)
-  )
+  if (!is_finite_scalar(n_init) || n_init < 1) {
+    stop("n_init must be a single finite number >= 1.", call. = FALSE)
+  }
+  if (!is.function(simulate)) {
+    stop("simulate must be a function.", call. = FALSE)
+  }
   target <- config$success_rate_target
   rel_tol <- config$rel_tol
   max_iter <- config$max_iterations
@@ -301,38 +300,30 @@ estimate_sample_size <- function(
   f0 <- config$f0
   f_floor <- config$f_floor
   base_seed <- config$seed
-  is_scalar <- function(x) is.numeric(x) && length(x) == 1L && is.finite(x)
-  if (!is_scalar(target) || target <= 0 || target >= 1) {
-    stop(
-      "`config$success_rate_target` must be a single number in (0, 1).",
-      call. = FALSE
-    )
-  }
-  if (!is_scalar(rel_tol) || rel_tol < 0) {
+  validate_open_unit_scalar(target, "`config$success_rate_target`")
+  if (!is_finite_scalar(rel_tol) || rel_tol < 0) {
     stop("`config$rel_tol` must be a single number >= 0.", call. = FALSE)
   }
-  if (!is_scalar(max_iter) || max_iter < 1) {
+  if (!is_finite_scalar(max_iter) || max_iter < 1) {
     stop("`config$max_iterations` must be a single number >= 1.", call. = FALSE)
   }
-  if (!is_scalar(B) || B < 1) {
+  if (!is_finite_scalar(B) || B < 1) {
     stop("`config$B` must be a single number >= 1.", call. = FALSE)
   }
-  if (!is_scalar(f0) || f0 <= 1) {
+  if (!is_finite_scalar(f0) || f0 <= 1) {
     stop("`config$f0` must be a single number > 1.", call. = FALSE)
   }
-  if (!is_scalar(f_floor) || f_floor <= 1 || f_floor > f0) {
+  if (!is_finite_scalar(f_floor) || f_floor <= 1 || f_floor > f0) {
     stop(
       "`config$f_floor` must be a single number with 1 < f_floor <= f0.",
       call. = FALSE
     )
   }
-  if (!is_scalar(base_seed)) {
+  if (!is_finite_scalar(base_seed)) {
     stop("`config$seed` must be a single finite number.", call. = FALSE)
   }
   n_max <- if (is.null(config$n_max)) 1e9 else config$n_max
-  if (!is_scalar(n_max) || n_max < 1 || n_max > .Machine$integer.max) {
-    stop("`config$n_max` must be a single number in [1, .Machine$integer.max].", call. = FALSE)
-  }
+  validate_n_max(n_max, "`config$n_max`")
   n_max <- as.integer(floor(n_max))
   max_iter <- as.integer(max_iter)
 

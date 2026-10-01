@@ -306,3 +306,38 @@ test_that("check_replicate_results() reports the first failure when several repl
   expect_error(check_replicate_results(results), "replicate 2", fixed = TRUE)
   expect_error(check_replicate_results(results), "first failure", fixed = TRUE)
 })
+
+
+# save_rng_state(): RNG kind/state restored, including when no .Random.seed existed ------------------------------
+
+test_that("replicate_streams() and replicate_apply() restore RNG kind and state (seed present)", {
+  withr::local_preserve_seed()
+  RNGkind("Mersenne-Twister")
+  set.seed(9)
+  kind_before <- RNGkind()
+  seed_before <- .Random.seed
+
+  streams <- replicate_streams(seed = 3, B = 3)
+  expect_identical(RNGkind(), kind_before)
+  expect_identical(.Random.seed, seed_before)
+
+  invisible(replicate_apply(streams, function(b) runif(1)))
+  expect_identical(RNGkind(), kind_before)
+  expect_identical(.Random.seed, seed_before)
+})
+
+test_that("replicate_streams() and replicate_apply() leave no .Random.seed behind when none existed", {
+  withr::local_preserve_seed()
+  RNGkind("Mersenne-Twister")
+  kind_before <- RNGkind()
+  has_seed <- function() exists(".Random.seed", envir = globalenv(), inherits = FALSE)
+
+  rm(".Random.seed", envir = globalenv())
+  streams <- replicate_streams(seed = 3, B = 3)
+  expect_false(has_seed())
+  expect_identical(RNGkind(), kind_before)
+
+  invisible(replicate_apply(streams, function(b) runif(1)))
+  expect_false(has_seed())
+  expect_identical(RNGkind(), kind_before)
+})
