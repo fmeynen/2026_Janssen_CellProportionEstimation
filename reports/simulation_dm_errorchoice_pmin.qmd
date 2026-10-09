@@ -69,7 +69,7 @@ success_range <- function(metric, n, n_people = config$n_people) {
 
 # Overview {#sec-overview}
 
-This report evaluates **dirichlet-multinomial** sampling error across cell-type proportions generated from a weighted Beta($\alpha$, 1) distribution, with the smallest population proportion pinned at $p_{\min} = `r p_min`$.
+This report evaluates **dirichlet-multinomial** sampling error across cell-type proportions generated from a weighted Beta($\alpha$, 1) distribution, **with the smallest population proportion set at** $p_{\min} = `r p_min`$.
 
 ## Success rule {#sec-success-rule}
 
@@ -87,7 +87,7 @@ A replicate **succeeds** for AE if $\max AE_j \le \tau_{AE}$, and for ARE if $\m
 
 The data are generated in two steps (a Dirichlet-multinomial hierarchy):
 
-1. Person $i$ has a true composition $\theta_i \sim \text{Dirichlet}(c \cdot p)$, where $p$ is the population mean composition and $c$ is the **concentration**.
+1. Person $i$ has a true composition $\theta_i \sim \text{Dirichlet}(c \cdot p)$, where $p$ is the population mean composition and $c$ is the concentration.
 2. From that person, $n$ cells are sampled: $\text{counts}_i \sim \text{Multinomial}(n, \theta_i)$, so $\hat p_{ij} = \text{count}_{ij} / n$.
 
 The population proportions $p$ are fixed values derived from a Beta distribution, with the smallest proportion pinned (@tbl-p, @fig-p-curve). The construction starts from the plain Beta($\alpha$, 1) proportions on a grid of $K$ points. The smallest type, and every type that would fall below $p_{\min}$, is set to exactly $p_{\min}$. The remaining types are rescaled proportionally so that all proportions still sum to one. A larger $\alpha$ makes the composition more skewed, so more types are set to $p_{\min}$: `r paste(n_pinned, collapse = ", ")` types for $\alpha = `r paste(config$alpha, collapse = ", ")`$ respectively. Each scenario $(\alpha, N, n)$ is simulated $B$ times. @tbl-setup lists all settings.
@@ -215,13 +215,11 @@ ae_end_1 <- sapply(config$alpha, function(a) success_n(result$curves_n, "AE", a,
 ae_end_max <- sapply(config$alpha, function(a) success_n(result$curves_n, "AE", a, N_max, max(n_grid)))
 ```
 
-For AE, the success rate increases with the number of cells per person and with the number of people. At $\alpha = `r alpha_max`$ with a single person, it rises from `r pct(success_n(result$curves_n, "AE", alpha_max, 1, min(n_grid)), 0)` at `r sci(min(n_grid))` cells to `r pct(success_n(result$curves_n, "AE", alpha_max, 1, 1e4), 0)` at `r sci(1e4)` cells, and ends at `r pct(success_n(result$curves_n, "AE", alpha_max, 1, max(n_grid)), 0)` at `r sci(max(n_grid))` cells. With `r N_max` people the same curve reaches `r pct(success_n(result$curves_n, "AE", alpha_max, N_max, 1e4), 0)` at `r sci(1e4)` cells and ends at `r pct(success_n(result$curves_n, "AE", alpha_max, N_max, max(n_grid)), 0)`. The curves flatten, and above roughly `r sci(1e6)` cells per person extra cells hardly help. The plateau depends mainly on the number of people: with a single person it lies between `r pct(min(ae_end_1), 0)` and `r pct(max(ae_end_1), 0)` across $\alpha$, and with `r N_max` people it is at least `r pct(min(ae_end_max), 1)`.
-
-For ARE the picture is more uniform. From `r sci(1e4)` cells per person on, the success rate is at least `r pct(success_range("ARE", 1e4)[1], 1)` for every $\alpha$ and every number of people, so the `r pct(config$target, 0)` target is reached everywhere. The differences are at small $n$. At `r sci(min(n_grid))` cells with a single person, success is `r pct(success_n(result$curves_n, "ARE", alpha_min, 1, min(n_grid)), 0)` at $\alpha = `r alpha_min`$ and falls to `r pct(success_n(result$curves_n, "ARE", alpha_max, 1, min(n_grid)), 0)` at $\alpha = `r alpha_max`$. With `r N_max` people the values are `r pct(success_n(result$curves_n, "ARE", alpha_min, N_max, min(n_grid)), 0)` and `r pct(success_n(result$curves_n, "ARE", alpha_max, N_max, min(n_grid)), 0)`. For comparison, without a bound the smallest proportion in the original simulation falls to about $3 \cdot 10^{-6}$ at $\alpha = 5$; here it is never below $`r p_min`$.
+Compare @fig-n-ae and @fig-n-are with their corresponding figures in the previous report simulation_dm_errorchoice.pdf. The curves for AE look similar, but the curves for ARE are clearly impacted. This is as expected, as for the ARE the smallest proportions are more impactful.
 
 ## Required cells per person {#sec-samplesize}
 
-@fig-samplesize-ae and @fig-samplesize-are show, for each $\alpha$ and number of people $N$, the smallest number of cells per person for which the success rate reaches the `r 100 * config$target`% target at the fixed thresholds, found with an iterative sample-size solver. Before solving, it is checked whether the target can be reached at all with very many cells per person; combinations where it cannot are marked with × at the top of the panel.
+@fig-samplesize-ae and @fig-samplesize-are show, for each $\alpha$ and number of people $N$, the smallest number of cells per person for which the success rate reaches the `r 100 * config$target`% target at the fixed thresholds, found with an iterative sample-size solver. Before solving, it is checked whether the target can be reached at all with very many cells per person; combinations where it cannot are marked with × at the top of the panel. Open markers indicate that the sample size calculation algorithm did not converge in the allotted time. The marker indicates the last value.
 
 ```{r}
 #| label: fig-samplesize-ae

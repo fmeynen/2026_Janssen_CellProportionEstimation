@@ -89,7 +89,7 @@ A replicate **succeeds** for AE if $\max AE_j \le \tau_{AE}$, and for ARE if $\m
 
 The data are generated in two steps (a Dirichlet-multinomial hierarchy):
 
-1. Person $i$ has a true composition $\theta_i \sim \text{Dirichlet}(c \cdot p)$, where $p$ is the population mean composition and $c$ is the **concentration**.
+1. Person $i$ has a true composition $\theta_i \sim \text{Dirichlet}(c \cdot p)$, where $p$ is the population mean composition and $c$ is the **concentration**. The concentration is the sum of the parameters in a dirichlet-multinomial.
 2. From that person, $n$ cells are sampled: $\text{counts}_i \sim \text{Multinomial}(n, \theta_i)$, so $\hat p_{ij} = \text{count}_{ij} / n$.
 
 The population proportions $p$ are fixed values derived from a Beta distribution (@tbl-p). A larger $\alpha$ makes the composition more skewed, so the rarest types become rarer. Each scenario $(\alpha, N, n)$ is simulated $B$ times. @tbl-setup lists all settings.
@@ -244,13 +244,13 @@ plot_success_vs_n(
 )
 ```
 
-For AE, the success rate increases with the number of cells per person, but only up to a point. At $\alpha = `r alpha_max`$ with a single person, it rises from `r pct(success_n(result$curves_n, "AE", alpha_max, 1, min(n_grid)), 0)` at `r sci(min(n_grid))` cells to `r pct(success_n(result$curves_n, "AE", alpha_max, 1, n_c), 0)` at $n \approx c$, and ends at `r pct(success_n(result$curves_n, "AE", alpha_max, 1, max(n_grid)), 0)` at `r sci(max(n_grid))` cells. With `r N_max` people the same curve ends at `r pct(success_n(result$curves_n, "AE", alpha_max, N_max, max(n_grid)), 0)`. Beyond roughly `r sci(10 * c_conc)` cells per person, extra cells hardly help, and only more people raise the plateau (@sec-why-level).
+For AE, the success rate increases with the number of cells per person, but only up to a point. At $\alpha = `r alpha_max`$ with a single person, it rises from `r pct(success_n(result$curves_n, "AE", alpha_max, 1, min(n_grid)), 0)` at `r sci(min(n_grid))` cells to `r pct(success_n(result$curves_n, "AE", alpha_max, 1, n_c), 0)` at $n \approx c$, and ends at `r pct(success_n(result$curves_n, "AE", alpha_max, 1, max(n_grid)), 0)` at `r sci(max(n_grid))` cells. With `r N_max` people the same curve ends at `r pct(success_n(result$curves_n, "AE", alpha_max, N_max, max(n_grid)), 0)`. Beyond roughly `r sci(10 * c_conc)` cells per person, extra cells hardly help, and only more people raise the plateau (explanation: see @sec-why-level).
 
-For ARE the picture depends on $\alpha$. At $\alpha = `r min(config$alpha)`$ with a single person, success rises from `r pct(success_n(result$curves_n, "ARE", min(config$alpha), 1, min(n_grid)), 0)` to `r pct(success_n(result$curves_n, "ARE", min(config$alpha), 1, max(n_grid)), 0)`. At $\alpha = `r alpha_max`$ it ends at only `r pct(success_n(result$curves_n, "ARE", alpha_max, 1, max(n_grid)), 0)` (1 person) and `r pct(success_n(result$curves_n, "ARE", alpha_max, N_max, max(n_grid)), 0)` (`r N_max` people). The rarest cell types have $c\,p_j \ll 1$, so in most replicates none of the people carry them. Then $\bar p_j = 0$ and $ARE_j = 1 > \tau_{ARE}$, however many cells are counted. At small $n$ the same happens through counting: a rare type that people do carry is often simply not observed. The irregular, non-monotone parts of the curves for $\alpha = 3$ and $4$ (around $10^3$ to $10^4$ cells) come from this discreteness. When the expected count of a rare type per person is of order one, $\hat p_{ij}$ can only take a few values, and whether $ARE_j \le \tau_{ARE}$ jumps with $n$.
+For ARE a similar result can be seen, success rate increases with the number of cells per person, but only up to a point, after which only an increase in the number of people can raise the success rate. Due to the rarity of the rarest cell types, at $\alpha = `r alpha_max`$ it ends at only `r pct(success_n(result$curves_n, "ARE", alpha_max, 1, max(n_grid)), 0)` (1 person) and `r pct(success_n(result$curves_n, "ARE", alpha_max, N_max, max(n_grid)), 0)` (`r N_max` people). The rarest cell types have $c\,p_j \ll 1$, so in most replicates none of the people carry them. Then $\bar p_j = 0$ and $ARE_j = 1 > \tau_{ARE}$, however many cells are counted.
 
 ## Required cells per person {#sec-samplesize}
 
-@fig-samplesize-ae and @fig-samplesize-are show, for each $\alpha$ and number of people $N$, the smallest number of cells per person for which the success rate reaches the `r 100 * config$target`% target at the fixed thresholds, found with an iterative sample-size solver. Before solving, it is checked whether the target can be reached at all with very many cells per person; combinations where it cannot are marked with × at the top of the panel.
+@fig-samplesize-ae and @fig-samplesize-are show, for each $\alpha$ and number of people $N$, the smallest number of cells per person for which the success rate reaches the `r 100 * config$target`% target at the fixed thresholds, found with an iterative sample-size solver. Before solving, it is checked whether the target can be reached at all with very many cells per person, or if the success rate plateaus under the wanted success rate. Those combinations where it cannot are marked with × at the top of the panel. Open markers indicate that the algorithm did not converge and indicate the last result before converging.
 
 ```{r}
 #| label: fig-samplesize-ae
@@ -302,8 +302,7 @@ The ratio of technical to biological variance is $c/n$. So technical variation m
 
 ## Illustration with Additional Simulation {#sec-theory-vs-sim}
 
-The main simulation only stores the worst-case error per replicate. To illustrate @eq-var-total directly per cell type, the report runs a small extra simulation. For $\alpha = `r alpha_max`$ it draws $\theta_{ij} \sim \text{Beta}(c\,p_j, c(1-p_j))$ (the exact marginal of the Dirichlet) and $\text{count}_{ij} \sim \text{Binomial}(n, \theta_{ij})$ (the exact marginal of the multinomial). This is done for the most abundant cell type and for a rare one (the rarest type with $c\,p_j \geq 0.25$; for the very rarest types a Monte Carlo SD is too noisy to compare with theory), with $N \in \{1, `r N_max`\}$ and $n$ from $10^1$ to `r sci(max(n_grid))`.
-
+To illustrate @eq-var-total directly per cell type, I have created a small additional simulation. For $\alpha = `r alpha_max`$ it draws $\theta_{ij}$ and $\text{count}_{ij} \sim \text{Binomial}(n, \theta_{ij})$. This is done for the most abundant cell type (cell type 10) and for a rare one (cell type 2).
 ```{r}
 #| label: overlay-sim
 
@@ -370,4 +369,4 @@ max_dev_common <- max(overlay_rel_dev[overlay$cell_type != rare_label])
 max_dev_rare <- max(overlay_rel_dev[overlay$cell_type == rare_label])
 ```
 
-@fig-overlay confirms the decomposition. The SD falls with $n$ up to about $n \approx c$ and then flattens, and above roughly `r sci(10 * c_conc)` cells adding cells no longer helps. The simulated SD stays within `r pct(max_dev_common)` of the formula for the most abundant type, and within `r pct(max_dev_rare)` for the rare type ($c\,p_j \approx `r fmt(c_conc * p_alpha[[overlay_types[2]]], 2)`$).
+@fig-overlay ilustrates the decomposition @eq-var-total. The SD falls with $n$ up to about $n \approx c$ and then flattens, and above roughly `r sci(10 * c_conc)` cells adding cells no longer helps.
