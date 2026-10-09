@@ -12,7 +12,9 @@ success rate, against the number of people:
 
 Line numbers are as of commit `b40a331` (`feat/samplesize-pmin`).
 
-**Status (2026-10-09): planned**, not started.
+**Status (2026-10-09): done** on `feat/samplesize-pmin`.
+- Steps 1–7 are done. The full test suite has 921 passing tests.
+- The calibration solve (alpha = 5, N = 10, AE) took 2.9 s. The grids took about 40 s per report, and the renders about 2.5 min (main) and 14 s (p_min).
 
 ## Background
 
