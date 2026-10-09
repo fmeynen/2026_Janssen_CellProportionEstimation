@@ -225,7 +225,7 @@ For ARE the picture is more uniform. From `r sci(1e4)` cells per person on, the 
 
 ```{r}
 #| label: fig-samplesize-ae
-#| fig-cap: !expr 'sprintf("Cells per person needed to reach the %s%% AE success target at $\tau_{AE} = %s$ (log scale), versus the number of people $N$. One panel per $\alpha$. An open marker means the solver did not converge; × at the top means the target cannot be reached.", 100 * config$target, tau_AE)'
+#| fig-cap: !expr 'sprintf("Cells per person needed to reach the %s%% AE success target at $\\tau_{AE} = %s$ (log scale), versus the number of people $N$. One panel per $\\alpha$. An open marker means the solver did not converge; × at the top means the target cannot be reached.", 100 * config$target, tau_AE)'
 #| fig-alt: "Four panels, one per alpha, showing the number of cells per person needed to reach the AE success target on a log scale versus the number of people. The required number typically decreases as people are added. Combinations where the target cannot be reached are marked with a cross at the top of the panel."
 
 plot_sample_size_by_people(
@@ -236,7 +236,7 @@ plot_sample_size_by_people(
 
 ```{r}
 #| label: fig-samplesize-are
-#| fig-cap: !expr 'sprintf("Cells per person needed to reach the %s%% ARE success target at $\tau_{ARE} = %s$ (log scale), versus the number of people $N$. One panel per $\alpha$. An open marker means the solver did not converge; × at the top means the target cannot be reached.", 100 * config$target, tau_ARE)'
+#| fig-cap: !expr 'sprintf("Cells per person needed to reach the %s%% ARE success target at $\\tau_{ARE} = %s$ (log scale), versus the number of people $N$. One panel per $\\alpha$. An open marker means the solver did not converge; × at the top means the target cannot be reached.", 100 * config$target, tau_ARE)'
 #| fig-alt: "Four panels, one per alpha, showing the number of cells per person needed to reach the ARE success target on a log scale versus the number of people. The required number typically decreases as people are added. Combinations where the target cannot be reached are marked with a cross at the top of the panel."
 
 plot_sample_size_by_people(
