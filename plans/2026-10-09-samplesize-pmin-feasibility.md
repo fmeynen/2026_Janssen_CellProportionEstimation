@@ -10,7 +10,10 @@ Decisions from a grilling session on 2026-10-09. Goals:
 
 Line numbers are as of commit `c56463d` (`main`).
 
-**Status (2026-10-09): planned**, not started.
+**Status (2026-10-09): done** on `feat/samplesize-pmin`.
+- Steps 1–9 are done. The full test suite has 893 passing tests and runs in about 8 s.
+- The solver's converged stopping reason is `"tolerance"`, not `"converged"`; the tests assert `"tolerance"`.
+- Infeasible alphas contribute `NULL` diagnostics (no rows), not an empty data.frame.
 
 ## Background
 
