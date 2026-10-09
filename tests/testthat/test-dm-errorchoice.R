@@ -68,3 +68,65 @@ test_that("run_dm_errorchoice_experiment rejects bad bounds before simulating", 
     )
   }
 })
+
+# run_dm_errorchoice_samplesize ---------------------------------------------------------------------------------
+
+#' Fake simulator recording what the runner forwards. Success follows plogis in log(n) and reaches 1, except for the
+#' metrics in `flat_metrics`, where it stays flat at 0.5 * B (so the target is unreachable).
+make_recording_sim <- function(flat_metrics = character()) {
+  seen <- list()
+  sim <- function(alpha, n, config, seed) {
+    seen[[length(seen) + 1L]] <<- list(
+      taus = names(config$taus), metrics = config$metrics, n_people = config$n_people, seed = seed
+    )
+    s <- if (any(names(config$taus) %in% flat_metrics)) {
+      as.integer(config$B / 2)
+    } else {
+      as.integer(round(config$B * stats::plogis(-5 + 1.5 * log(n) - 0.3 * alpha)))
+    }
+    list(success_count = s, success_rate = s / config$B)
+  }
+  list(sim = sim, seen = function() seen)
+}
+
+samplesize_config <- function() {
+  utils::modifyList(
+    simulation_dm_errorchoice_defaults(),
+    list(alpha = c(2, 3), n_people = c(1L, 2L), B = 20L)
+  )
+}
+
+test_that("run_dm_errorchoice_samplesize returns one row per (alpha, n_people, metric) and isolates metrics", {
+  fake <- make_recording_sim()
+  res <- run_dm_errorchoice_samplesize(samplesize_config(), cache_dir = withr::local_tempdir(), simulate = fake$sim)
+  expect_named(
+    res,
+    c("alpha", "n_people", "metric", "sample_size", "stopping_reason", "iterations_used", "success_ceiling")
+  )
+  expect_equal(nrow(res), 8L)
+  expect_equal(nrow(unique(res[, c("alpha", "n_people", "metric")])), 8L)
+  expect_setequal(res$metric, c("AE", "ARE"))
+  expect_setequal(res$n_people, c(1L, 2L))
+  expect_false(anyNA(res$sample_size))
+
+  seen <- fake$seen()
+  expect_true(all(vapply(seen, function(s) length(s$metrics) == 1L && identical(s$taus, s$metrics), logical(1))))
+  expect_setequal(vapply(seen, function(s) s$metrics, character(1)), c("AE", "ARE"))
+  expect_setequal(vapply(seen, function(s) s$n_people, numeric(1)), c(1, 2))
+  expect_true(all(vapply(seen, function(s) s$seed == 260926L, logical(1))))
+})
+
+test_that("run_dm_errorchoice_samplesize keeps infeasible rows with NA sample_size", {
+  fake <- make_recording_sim(flat_metrics = "ARE")
+  expect_warning(
+    res <- run_dm_errorchoice_samplesize(samplesize_config(), cache_dir = withr::local_tempdir(), simulate = fake$sim),
+    "infeasible"
+  )
+  expect_equal(nrow(res), 8L)
+  are <- res[res$metric == "ARE", ]
+  ae <- res[res$metric == "AE", ]
+  expect_true(all(is.na(are$sample_size)))
+  expect_true(all(are$stopping_reason == "infeasible"))
+  expect_false(anyNA(ae$sample_size))
+  expect_false(any(ae$stopping_reason == "infeasible"))
+})

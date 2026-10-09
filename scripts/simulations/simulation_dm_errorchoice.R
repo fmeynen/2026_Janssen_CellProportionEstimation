@@ -21,6 +21,9 @@
 #      tau, per (alpha, n_people, metric).
 #   4. curves_n: with tau held fixed at `taus_fixed[[metric]]`, sweep n_per_person (`n_per_person_grid`) to get
 #      success rate vs cells-per-person, per (alpha, n_people, metric).
+#   5. run_dm_errorchoice_samplesize(): with tau held fixed at `taus_fixed[[metric]]`, solve for the smallest
+#      cells-per-person (n_per_person) reaching the success-rate `target`, per (alpha, n_people, metric), using the
+#      sample-size solver (one solver run per n_people x metric, since the solver's success rule is joint over metrics).
 #
 # Possible future changes:
 #   * Additional error metrics
@@ -51,6 +54,15 @@ source(here::here("scripts", "load_layers.R"))
 #'     \item{tau_grid_prob}{Quantile probability used to set the data-driven tau grid's upper end.}
 #'     \item{target}{Success-rate reference line used by the `curves_n` plot.}
 #'     \item{seed}{Base seed; see `run_dm_errorchoice_experiment()` for how it is combined with (alpha, n_people).}
+#'     \item{tie_method}{Tie handling in the sample-size solver's success rule (used only by
+#'       `run_dm_errorchoice_samplesize()`).}
+#'     \item{rel_tol}{Sample-size solver relative tolerance on the success rate.}
+#'     \item{max_iterations}{Sample-size solver iteration cap.}
+#'     \item{f0}{Sample-size solver initial bracket factor.}
+#'     \item{f_floor}{Sample-size solver minimum bracket factor.}
+#'     \item{n_max}{Largest cells-per-person value the sample-size solver considers; also used for the feasibility
+#'       check.}
+#'     \item{n_init}{Sample-size solver starting value; `NULL` starts from `concentration`.}
 #'   }
 simulation_dm_errorchoice_defaults <- function() {
   list(
@@ -70,7 +82,14 @@ simulation_dm_errorchoice_defaults <- function() {
     tau_grid_points = 200L,
     tau_grid_prob = 0.95,
     target = 0.95,
-    seed = 260926L
+    seed = 260926L,
+    tie_method = "random",
+    rel_tol = 0.01,
+    max_iterations = 20L,
+    f0 = 2,
+    f_floor = 1.1,
+    n_max = 1e9,
+    n_init = NULL
   )
 }
 
@@ -223,4 +242,78 @@ run_simulation_dm_errorchoice <- function(config = simulation_dm_errorchoice_def
     curves_tau = curves_tau,
     curves_n = curves_n
   )
+}
+
+# ---- Required cells per person (sample-size solver) ------------------------
+
+#' Solve for the cells per person needed to reach the target success rate, per (alpha, n_people, metric).
+#'
+#' Runs `run_sample_size_experiment()` once per (`n_people`, metric) pair, because the solver's success rule is joint
+#' over all metrics in its `taus`; each run therefore gets exactly one metric, with `taus = config$taus_fixed[metric]`.
+#' Every run uses `config$seed` (common random numbers across n_people and metrics). Alphas whose target cannot be
+#' reached emit the solver's warning (not suppressed here) and are kept as rows with `sample_size` `NA` and
+#' `stopping_reason` `"infeasible"`. Caching is per alpha inside `run_sample_size_experiment()`.
+#'
+#' @param config    List as returned by `simulation_dm_errorchoice_defaults()`.
+#' @param cache     Logical; read/write the per-alpha cached results under `cache_dir`.
+#' @param force_recompute Logical; ignore existing cache files and recompute.
+#' @param cache_dir Directory holding the cached `.rds` files.
+#' @param simulate  Function `(alpha, n, config, seed)` forwarded to `run_sample_size_experiment()`. Defaults to
+#'   `simulate_success_at_n()`.
+#'
+#' @return Data.frame with columns `alpha`, `n_people`, `metric`, `sample_size` (cells per person; `NA` if
+#'   infeasible), `stopping_reason`, `iterations_used`, `success_ceiling`.
+run_dm_errorchoice_samplesize <- function(config = simulation_dm_errorchoice_defaults(),
+                                          cache = TRUE,
+                                          force_recompute = FALSE,
+                                          cache_dir = here::here("results", "simresults"),
+                                          simulate = simulate_success_at_n) {
+  rows <- list()
+  for (n_people in config$n_people) {
+    for (metric in config$metrics) {
+      solver_config <- list(
+        alpha = config$alpha,
+        K = config$K,
+        B = config$B,
+        taus = config$taus_fixed[metric],
+        metrics = metric,
+        model = "dirichlet_multinomial",
+        tie_method = config$tie_method,
+        proportion_method = config$proportion_method,
+        p_min = config$p_min,
+        p_max = config$p_max,
+        n_people = n_people,
+        concentration = config$concentration,
+        seed = config$seed,
+        success_rate_target = config$target,
+        rel_tol = config$rel_tol,
+        max_iterations = config$max_iterations,
+        f0 = config$f0,
+        f_floor = config$f_floor,
+        n_max = config$n_max,
+        n_init = config$n_init
+      )
+      res <- run_sample_size_experiment(
+        solver_config,
+        cache = cache,
+        force_recompute = force_recompute,
+        cache_dir = cache_dir,
+        simulate = simulate
+      )
+      ss <- res$sample_size
+      rows[[length(rows) + 1L]] <- data.frame(
+        alpha = ss$alpha,
+        n_people = n_people,
+        metric = metric,
+        sample_size = ss$sample_size,
+        stopping_reason = ss$stopping_reason,
+        iterations_used = ss$iterations_used,
+        success_ceiling = ss$success_ceiling,
+        stringsAsFactors = FALSE
+      )
+    }
+  }
+  out <- do.call(rbind, rows)
+  rownames(out) <- NULL
+  out
 }
