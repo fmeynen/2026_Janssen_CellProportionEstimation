@@ -4,7 +4,11 @@ Decisions from a grilling session on 2026-10-09. Goal: a report like `reports/si
 with the smallest population proportion fixed at `p_min = 0.01`, and without the concentration and level-off
 explainers. Line numbers are as of commit `74856ea` (`main`).
 
-**Status (2026-10-09): planned.**
+**Status (2026-10-09): done** on `feat/dm-errorchoice-pmin`.
+- Steps 1–5 and 7 are done.
+- Step 6 was a no-op: `results/simresults/` held no cache files.
+- The full DM simulation takes about 52 s, and the PDF render about 22 s with the simulation cached.
+- The test suite has 726 passing tests.
 
 ## Decisions
 
