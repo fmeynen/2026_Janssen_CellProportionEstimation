@@ -11,7 +11,8 @@
 # AE and ARE are studied separately throughout (never combined into a joint success criterion).
 #
 # Workflow
-#   1. Generate population mean proportions from a monotone Beta curve (deterministic), once per alpha.
+#   1. Generate population mean proportions from a monotone Beta curve (deterministic), once per alpha. Optionally
+#      pin the smallest (largest) types to p_min (p_max) via proportion_method "fixed_min_beta" ("fixed_max_beta").
 #   2. For each (alpha, n_people, n_per_person) scenario, simulate B Dirichlet-multinomial replicates and reduce
 #      each replicate immediately to one scalar "stat" per metric (max over cell types of the pooled-estimate
 #      error; see replicate_pooled_error()).
@@ -23,7 +24,6 @@
 #
 # Possible future changes:
 #   * Additional error metrics
-#   * Non-beta proportion-generation methods
 # ---------------------------------------------------------------------------
 source(here::here("scripts", "load_layers.R"))
 
@@ -37,7 +37,9 @@ source(here::here("scripts", "load_layers.R"))
 #'     \item{K}{Number of cell types.}
 #'     \item{B}{Replicates per scenario.}
 #'     \item{metrics}{Error metrics studied separately (`"AE"`, `"ARE"`).}
-#'     \item{proportion_method}{Proportion-generation method.}
+#'     \item{proportion_method}{Proportion-generation method (`"beta"`, `"fixed_min_beta"`, `"fixed_max_beta"`).}
+#'     \item{p_min}{Lower bound pinned by `"fixed_min_beta"`; `NULL` for plain beta.}
+#'     \item{p_max}{Upper bound pinned by `"fixed_max_beta"`; `NULL` for plain beta.}
 #'     \item{n_people}{Grid of persons per replicate.}
 #'     \item{concentration}{Dirichlet concentration parameter.}
 #'     \item{n_per_person_fixed}{Cells per person held fixed for the tau-sweep (`curves_tau`).}
@@ -57,6 +59,8 @@ simulation_dm_errorchoice_defaults <- function() {
     B = 1000L,
     metrics = c("AE", "ARE"),
     proportion_method = "beta",
+    p_min = NULL,
+    p_max = NULL,
     n_people = c(1L, 2L, 3L, 5L, 10L),
     concentration = 1e4,
     n_per_person_fixed = 200000L,
@@ -70,6 +74,18 @@ simulation_dm_errorchoice_defaults <- function() {
   )
 }
 
+#' Errorchoice configuration with the smallest cell types pinned to `p_min`.
+#'
+#' Same as `simulation_dm_errorchoice_defaults()` except `proportion_method = "fixed_min_beta"` and `p_min = 0.01`.
+#'
+#' @return Named list of simulation parameters; see `simulation_dm_errorchoice_defaults()`.
+simulation_dm_errorchoice_pmin_defaults <- function() {
+  utils::modifyList(
+    simulation_dm_errorchoice_defaults(),
+    list(proportion_method = "fixed_min_beta", p_min = 0.01)
+  )
+}
+
 # ---- Run experiment --------------------------------------------------------
 
 #' Run (or load from cache) the Dirichlet-multinomial errorchoice simulation.
@@ -77,8 +93,8 @@ simulation_dm_errorchoice_defaults <- function() {
 #' Runs `run_dm_errorchoice_experiment()` over `n_values <- sort(unique(c(config$n_per_person_grid,
 #' config$n_per_person_fixed)))`, then derives two tidy success-rate views from the resulting `stats` table:
 #' `curves_tau` (tau-sweep at `n_per_person_fixed`) and `curves_n` (n_per_person-sweep at `taus_fixed`). The cache
-#' key only includes simulation-relevant fields (`alpha`, `K`, `B`, `metrics`, `proportion_method`, `n_people`,
-#' `concentration`, `n_per_person = n_values`, `seed`), so changing `taus`, `taus_fixed`, `target`,
+#' key only includes simulation-relevant fields (`alpha`, `K`, `B`, `metrics`, `proportion_method`, `p_min`, `p_max`,
+#' `n_people`, `concentration`, `n_per_person = n_values`, `seed`), so changing `taus`, `taus_fixed`, `target`,
 #' `tau_grid_points` or `tau_grid_prob` reuses the same cached simulation result.
 #'
 #' @param config    List as returned by `simulation_dm_errorchoice_defaults()`.
@@ -113,6 +129,8 @@ run_simulation_dm_errorchoice <- function(config = simulation_dm_errorchoice_def
     B = config$B,
     metrics = config$metrics,
     proportion_method = config$proportion_method,
+    p_min = config$p_min,
+    p_max = config$p_max,
     n_people = config$n_people,
     concentration = config$concentration,
     n_per_person = n_values,
@@ -129,6 +147,8 @@ run_simulation_dm_errorchoice <- function(config = simulation_dm_errorchoice_def
         B = config$B,
         metrics = config$metrics,
         proportion_method = config$proportion_method,
+        p_min = config$p_min,
+        p_max = config$p_max,
         n_people = config$n_people,
         n_per_person = n_values,
         concentration = config$concentration,
