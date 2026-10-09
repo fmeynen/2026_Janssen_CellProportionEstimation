@@ -26,27 +26,61 @@ generate_proportions_beta <- function(alpha, K = 10, grid = default_beta_grid(K)
   p
 }
 
-#' Generate K true proportions with a fixed maximum at the highest index.
+#' Clip the most extreme proportions to a bound and rescale the rest.
 #'
-#' @param alpha  shape1 parameter of the Beta(alpha, 1) remainder curve.
+#' @param p      Numeric proportion vector (strictly positive, summing to 1).
+#' @param bound  Bound that the extreme proportion(s) are set to exactly.
+#' @param side   `"min"` pins the smallest value to `bound` (no value may end below it); `"max"` pins the largest value
+#'               to `bound` (no value may end above it).
+#'
+#' @return Numeric vector of the same length as `p`, summing to 1, with at least one entry equal to `bound` and none
+#'         beyond it.
+#'
+#' @details
+#' The single most extreme entry is pinned first. The unpinned entries of the original `p` are then rescaled
+#' proportionally so that they sum to `1 - n_pinned * bound`. Any rescaled entry that crosses the bound is pinned too and
+#' the rescaling is repeated until no new entry crosses. Ties at the bound are allowed.
+pin_to_bound <- function(p, bound, side = c("min", "max")) {
+  side <- match.arg(side)
+  pinned <- logical(length(p))
+  pinned[if (identical(side, "min")) which.min(p) else which.max(p)] <- TRUE
+  repeat {
+    q <- p
+    q[pinned] <- bound
+    if (all(pinned)) {
+      break
+    }
+    q[!pinned] <- p[!pinned] * (1 - sum(pinned) * bound) / sum(p[!pinned])
+    crossed <- if (identical(side, "min")) q < bound else q > bound
+    crossed <- crossed & !pinned
+    if (!any(crossed)) {
+      break
+    }
+    pinned <- pinned | crossed
+  }
+  q
+}
+
+#' Generate K true proportions with the largest value fixed at `p_max`.
+#'
+#' @param alpha  shape1 parameter of the underlying Beta(alpha, 1) curve.
 #' @param K      number of cell types (default 10; must be at least 2).
-#' @param p_max  fixed largest true proportion(s), placed at the highest index.
-#' @param grid   evaluation points in (0,1), length K - 1, used to construct the Beta-shaped remainder over the first
-#'               K - 1 indices.
+#' @param p_max  fixed largest true proportion(s).
+#' @param grid   evaluation points in (0,1), length K (default `default_beta_grid(K)`), as for method `"beta"`.
 #'
-#' @return If `length(p_max) == 1`, a numeric vector of length K, all strictly positive, summing to 1, with a strictly
-#'         unique largest value at index K.
+#' @return If `length(p_max) == 1`, a numeric vector of length K, all strictly positive, summing to 1, whose largest
+#'         value equals `p_max` exactly (ties allowed).
 #'         If `length(p_max) > 1`, a numeric matrix with one row per `p_max` value and K columns
 #'         (`cell_type_1`, ..., `cell_type_K`).
 #'
 #' @details
-#' The first `K - 1` proportions are built from Beta(alpha, 1) weights, normalized and then rescaled to sum to
-#' `1 - p_max`. The final proportion is set to `p_max`, so the largest true proportion is fixed at the highest index.
-#' If the rescaled remainder contains any value `>= p_max`, the combination of `alpha`, `K`, and `p_max` is impossible
-#' for a strictly unique fixed maximum; the function warns and then fails. When `p_max` contains multiple values, this
+#' Starts from `generate_proportions_beta(alpha, K, grid)`, sets its largest entry to `p_max` and rescales the other
+#' entries proportionally so that the total is 1. Entries that would then exceed `p_max` are clipped to `p_max` as well
+#' and the remainder is rescaled again (see `pin_to_bound()`), so `p_max` is always attained. The combination is
+#' impossible when `K * p_max < 1`; the function then warns and fails. When `p_max` contains multiple values, this
 #' construction is applied independently per value.
 generate_props_fixed_max_beta <- function(alpha, K = 10, p_max,
-                                          grid = default_beta_grid(K - 1L)) {
+                                          grid = default_beta_grid(K)) {
   if (!is.numeric(alpha) || length(alpha) != 1L || !is.finite(alpha) || alpha <= 0) {
     stop("alpha must be a single positive number.", call. = FALSE)
   }
@@ -54,8 +88,8 @@ generate_props_fixed_max_beta <- function(alpha, K = 10, p_max,
     stop("K must be a single integer >= 2 for method = 'fixed_max_beta'.", call. = FALSE)
   }
   validate_p_max(p_max, method_arg = "method")
-  if (length(grid) != K - 1L) {
-    stop("grid must have length K - 1 for method = 'fixed_max_beta'.", call. = FALSE)
+  if (length(grid) != K) {
+    stop("grid must have length K for method = 'fixed_max_beta'.", call. = FALSE)
   }
   if (length(p_max) > 1L) {
     p_mat <- t(vapply(
@@ -70,44 +104,35 @@ generate_props_fixed_max_beta <- function(alpha, K = 10, p_max,
     return(p_mat)
   }
 
-  remainder_weights <- dbeta(grid, shape1 = alpha, shape2 = 1)
-  remainder <- (1 - p_max) * normalize_to_simplex(remainder_weights)
-
-  if (any(remainder >= p_max)) {
-    fail_fixed_max_beta_impossible(
-      non_max = remainder,
-      alpha = alpha,
-      K = K,
-      p_max = p_max
-    )
+  if (K * p_max < 1 - 1e-12) {
+    fail_fixed_max_beta_impossible(alpha = alpha, K = K, p_max = p_max)
   }
 
-  p <- c(remainder, p_max)
+  p <- pin_to_bound(generate_proportions_beta(alpha, K, grid), p_max, side = "max")
   validate_proportions(p)
   p
 }
 
-#' Generate K true proportions with a fixed minimum at the lowest index.
+#' Generate K true proportions with the smallest value fixed at `p_min`.
 #'
-#' @param alpha  shape1 parameter of the Beta(alpha, 1) remainder curve.
+#' @param alpha  shape1 parameter of the underlying Beta(alpha, 1) curve.
 #' @param K      number of cell types (default 10; must be at least 2).
-#' @param p_min  fixed smallest true proportion(s), placed at the lowest index.
-#' @param grid   evaluation points in (0,1), length K - 1, used to construct the Beta-shaped remainder over the last
-#'               K - 1 indices.
+#' @param p_min  fixed smallest true proportion(s).
+#' @param grid   evaluation points in (0,1), length K (default `default_beta_grid(K)`), as for method `"beta"`.
 #'
-#' @return If `length(p_min) == 1`, a numeric vector of length K, all strictly positive, summing to 1, with a smallest
-#'         value at index 1 (ties with other indices allowed).
+#' @return If `length(p_min) == 1`, a numeric vector of length K, all strictly positive, summing to 1, whose smallest
+#'         value equals `p_min` exactly (ties allowed).
 #'         If `length(p_min) > 1`, a numeric matrix with one row per `p_min` value and K columns
 #'         (`cell_type_1`, ..., `cell_type_K`).
 #'
 #' @details
-#' The last `K - 1` proportions are built from Beta(alpha, 1) weights, normalized and then rescaled to sum to
-#' `1 - p_min`. The first proportion is set to `p_min`, so the smallest true proportion is fixed at the lowest index.
-#' If the rescaled remainder contains any value `< p_min` (up to a tolerance of 1e-12), the combination of `alpha`, `K`,
-#' and `p_min` is impossible; the function warns and then fails. When `p_min` contains multiple values, this
+#' Starts from `generate_proportions_beta(alpha, K, grid)`, sets its smallest entry to `p_min` and rescales the other
+#' entries proportionally so that the total is 1. Entries that would then fall below `p_min` are clipped to `p_min` as
+#' well and the remainder is rescaled again (see `pin_to_bound()`), so `p_min` is always attained. The combination is
+#' impossible when `K * p_min > 1`; the function then warns and fails. When `p_min` contains multiple values, this
 #' construction is applied independently per value.
 generate_props_fixed_min_beta <- function(alpha, K = 10, p_min,
-                                          grid = default_beta_grid(K - 1L)) {
+                                          grid = default_beta_grid(K)) {
   if (!is.numeric(alpha) || length(alpha) != 1L || !is.finite(alpha) || alpha <= 0) {
     stop("alpha must be a single positive number.", call. = FALSE)
   }
@@ -120,8 +145,8 @@ generate_props_fixed_min_beta <- function(alpha, K = 10, p_min,
   if (!is.numeric(p_min) || any(!is.finite(p_min)) || any(p_min <= 0) || any(p_min >= 1)) {
     stop("p_min must contain number(s) strictly between 0 and 1.", call. = FALSE)
   }
-  if (length(grid) != K - 1L) {
-    stop("grid must have length K - 1 for method = 'fixed_min_beta'.", call. = FALSE)
+  if (length(grid) != K) {
+    stop("grid must have length K for method = 'fixed_min_beta'.", call. = FALSE)
   }
   if (length(p_min) > 1L) {
     p_mat <- t(vapply(
@@ -136,19 +161,11 @@ generate_props_fixed_min_beta <- function(alpha, K = 10, p_min,
     return(p_mat)
   }
 
-  remainder_weights <- dbeta(grid, shape1 = alpha, shape2 = 1)
-  remainder <- (1 - p_min) * normalize_to_simplex(remainder_weights)
-
-  if (any(remainder < p_min - 1e-12)) {
-    fail_fixed_min_beta_impossible(
-      non_min = remainder,
-      alpha = alpha,
-      K = K,
-      p_min = p_min
-    )
+  if (K * p_min > 1 + 1e-12) {
+    fail_fixed_min_beta_impossible(alpha = alpha, K = K, p_min = p_min)
   }
 
-  p <- c(p_min, remainder)
+  p <- pin_to_bound(generate_proportions_beta(alpha, K, grid), p_min, side = "min")
   validate_proportions(p)
   p
 }
@@ -158,14 +175,15 @@ generate_props_fixed_min_beta <- function(alpha, K = 10, p_min,
 #' @param alpha   Shape parameter used by the requested generation method.
 #' @param K       Number of cell types (default 10).
 #' @param method  Proportion-generation method: `"beta"`, `"fixed_max_beta"`, or `"fixed_min_beta"`.
-#' @param p_max   Fixed largest true proportion for `"fixed_max_beta"`. The largest value is always placed at the
-#'                highest index and must remain strictly unique; impossible combinations warn and fail. May be a numeric
-#'                 vector when calling the fixed-max generator directly.
-#' @param p_min   Fixed smallest true proportion for `"fixed_min_beta"`. The smallest value is always placed at the
-#'                lowest index (ties allowed); impossible combinations warn and fail. May be a numeric vector.
-#' @param grid    Optional evaluation points in (0,1). `NULL` (default) uses each method's own default grid. When
-#'                supplied, it must have length K for `"beta"` and length K - 1 for `"fixed_max_beta"` /
-#'                `"fixed_min_beta"`.
+#' @param p_max   Fixed largest true proportion for `"fixed_max_beta"`. The largest value of the Beta curve is set to
+#'                `p_max` and the rest rescaled (values that would exceed it are clipped to it); impossible
+#'                combinations (`K * p_max < 1`) warn and fail. May be a numeric vector when calling the fixed-max
+#'                generator directly.
+#' @param p_min   Fixed smallest true proportion for `"fixed_min_beta"`. The smallest value of the Beta curve is set to
+#'                `p_min` and the rest rescaled (values that would fall below it are clipped to it); impossible
+#'                combinations (`K * p_min > 1`) warn and fail. May be a numeric vector.
+#' @param grid    Optional evaluation points in (0,1) of length K, for every method. `NULL` (default) uses
+#'                `default_beta_grid(K)`.
 #'
 #' @return Numeric vector of length K, all strictly positive, summing to 1.
 #'   For methods `"fixed_max_beta"` / `"fixed_min_beta"` with vector `p_max` / `p_min`, returns a numeric matrix with

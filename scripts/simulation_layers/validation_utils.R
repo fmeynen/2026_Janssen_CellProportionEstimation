@@ -16,8 +16,7 @@ normalize_to_simplex <- function(w) {
 
 #' Default evaluation grid for Beta-based proportion generators.
 #'
-#' Returns a shared interior grid of the requested length. The fixed-max Beta
-#' generator reuses this helper with `K - 1` points for its non-max remainder.
+#' Returns a shared interior grid of the requested length (K points for every Beta-based generator).
 default_beta_grid <- function(K) {
   seq(0.05, 0.95, length.out = K)
 }
@@ -36,27 +35,24 @@ validate_proportions <- function(p, tol = 1e-12) {
 }
 
 fixed_max_beta_impossible_error <- paste(
-  "method = 'fixed_max_beta' failed because the fixed largest proportion is not strictly unique."
+  "method = 'fixed_max_beta' failed because K * p_max < 1, so no proportion vector can have p_max as its maximum."
 )
 
-#' Warn and fail when fixed-max Beta proportions cannot keep a unique maximum.
+#' Warn and fail when no K-vector can have `p_max` as its maximum.
 #'
-#' An impossible combination is defined exactly as follows: after constructing
-#' the Beta-shaped remainder and scaling it to sum to `1 - p_max`, at least one
-#' non-max component is `>= p_max`, so the fixed largest component is no longer
-#' strictly unique.
-fail_fixed_max_beta_impossible <- function(non_max, alpha, K, p_max) {
+#' An impossible combination is defined exactly as follows: `K * p_max < 1`, so
+#' even K equal proportions of `p_max` would sum to less than 1.
+fail_fixed_max_beta_impossible <- function(alpha, K, p_max) {
   warning(
     sprintf(
       paste(
         "Impossible fixed_max_beta combination for alpha=%s, K=%s, p_max=%s:",
-        "after scaling the Beta-shaped remainder to sum to 1 - p_max,",
-        "at least one non-max component is >= p_max (max non-max = %s)."
+        "K * p_max = %s < 1, so p_max cannot be the largest of K proportions summing to 1."
       ),
       format(alpha, trim = TRUE),
       K,
       format(p_max, trim = TRUE),
-      format(max(non_max), trim = TRUE)
+      format(K * p_max, trim = TRUE)
     ),
     call. = FALSE
   )
@@ -67,27 +63,24 @@ fail_fixed_max_beta_impossible <- function(non_max, alpha, K, p_max) {
 }
 
 fixed_min_beta_impossible_error <- paste(
-  "method = 'fixed_min_beta' failed because the fixed smallest proportion is not the minimum."
+  "method = 'fixed_min_beta' failed because K * p_min > 1, so no proportion vector can have p_min as its minimum."
 )
 
-#' Warn and fail when fixed-min Beta proportions cannot keep p_min as the minimum.
+#' Warn and fail when no K-vector can have `p_min` as its minimum.
 #'
-#' An impossible combination is defined exactly as follows: after constructing
-#' the Beta-shaped remainder and scaling it to sum to `1 - p_min`, at least one
-#' non-min component is `< p_min` (up to a small tolerance), so the fixed
-#' smallest component is no longer the minimum. Ties with `p_min` are allowed.
-fail_fixed_min_beta_impossible <- function(non_min, alpha, K, p_min) {
+#' An impossible combination is defined exactly as follows: `K * p_min > 1`, so
+#' even K equal proportions of `p_min` would sum to more than 1.
+fail_fixed_min_beta_impossible <- function(alpha, K, p_min) {
   warning(
     sprintf(
       paste(
         "Impossible fixed_min_beta combination for alpha=%s, K=%s, p_min=%s:",
-        "after scaling the Beta-shaped remainder to sum to 1 - p_min,",
-        "at least one non-min component is < p_min (min non-min = %s)."
+        "K * p_min = %s > 1, so p_min cannot be the smallest of K proportions summing to 1."
       ),
       format(alpha, trim = TRUE),
       K,
       format(p_min, trim = TRUE),
-      format(min(non_min), trim = TRUE)
+      format(K * p_min, trim = TRUE)
     ),
     call. = FALSE
   )

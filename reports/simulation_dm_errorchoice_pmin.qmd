@@ -1,0 +1,219 @@
+---
+title: "Dirichlet-Multinomial Error-Choice Simulation (p_min = 0.01)"
+date: "2026-10-09"
+format:
+  pdf:
+    documentclass: article
+    papersize: a4
+    toc: false
+    number-sections: true
+    fig-pos: "H"
+    fig-width: 9
+    fig-height: 5.5
+    geometry:
+      - margin=2.5cm
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r}
+#| label: setup
+#| include: false
+
+source(here::here("scripts", "simulations", "simulation_dm_errorchoice.R"))
+
+config <- simulation_dm_errorchoice_pmin_defaults()
+result <- suppressMessages(run_simulation_dm_errorchoice(config))
+
+c_conc <- config$concentration
+K <- config$K
+p_min <- config$p_min
+tau_AE <- config$taus_fixed$AE
+tau_ARE <- config$taus_fixed$ARE
+n_fixed <- config$n_per_person_fixed
+n_grid <- config$n_per_person_grid
+N_max <- max(config$n_people)
+alpha_min <- min(config$alpha)
+alpha_max <- max(config$alpha)
+
+p_mat <- as.matrix(result$p_table[, paste0("cell_type_", seq_len(K))])
+rownames(p_mat) <- result$p_table$alpha
+# Number of cell types set to p_min for each alpha.
+n_pinned <- rowSums(abs(p_mat - p_min) < 1e-12)
+
+fmt <- function(x, digits = 3) formatC(x, digits = digits, format = "fg", big.mark = ",")
+pct <- function(x, digits = 1) paste0(formatC(100 * x, digits = digits, format = "f"), "%")
+sci <- function(x) {
+  e <- floor(log10(x))
+  m <- x / 10^e
+  if (isTRUE(all.equal(m, 1))) sprintf("$10^{%d}$", e) else sprintf("$%s \\cdot 10^{%d}$", fmt(m, 2), e)
+}
+
+success_n <- function(curves, metric, alpha, n_people, n) {
+  rows <- curves[curves$metric == metric & curves$alpha == alpha & curves$n_people == n_people, ]
+  rows$success_rate[which.min(abs(log(rows$n_per_person) - log(n)))]
+}
+
+# Range of the success rate at (about) n over all alpha, for the given numbers of people.
+success_range <- function(metric, n, n_people = config$n_people) {
+  v <- unlist(lapply(config$alpha, function(a) {
+    vapply(n_people, function(N) success_n(result$curves_n, metric, a, N, n), numeric(1))
+  }))
+  range(v)
+}
+
+```
+
+# Overview {#sec-overview}
+
+This report evaluates **dirichlet-multinomial** sampling error across cell-type proportions generated from a weighted Beta($\alpha$, 1) distribution, with the smallest population proportion pinned at $p_{\min} = `r p_min`$.
+
+## Success rule {#sec-success-rule}
+
+For each replicate and cell type $j$, the estimated proportions are averaged over the $N$ people in that replicate. The average is compared with the population-level true proportion $p_j$:
+
+$$
+\bar p_j = \frac{1}{N}\sum_{i=1}^{N} \hat p_{ij}, \qquad
+AE_j = |\bar p_j - p_j|, \qquad
+ARE_j = \frac{|\bar p_j - p_j|}{p_j}.
+$$ {#eq-errors}
+
+A replicate **succeeds** for AE if $\max AE_j \le \tau_{AE}$, and for ARE if $\max ARE_j \le \tau_{ARE}$. AE and ARE are always evaluated separately and never combined into one criterion.
+
+# Simulation setup {#sec-setup}
+
+The data are generated in two steps (a Dirichlet-multinomial hierarchy):
+
+1. Person $i$ has a true composition $\theta_i \sim \text{Dirichlet}(c \cdot p)$, where $p$ is the population mean composition and $c$ is the **concentration**.
+2. From that person, $n$ cells are sampled: $\text{counts}_i \sim \text{Multinomial}(n, \theta_i)$, so $\hat p_{ij} = \text{count}_{ij} / n$.
+
+The population proportions $p$ are fixed values derived from a Beta distribution, with the smallest proportion pinned (@tbl-p, @fig-p-curve). The construction starts from the plain Beta($\alpha$, 1) proportions on a grid of $K$ points. The smallest type, and every type that would fall below $p_{\min}$, is set to exactly $p_{\min}$. The remaining types are rescaled proportionally so that all proportions still sum to one. A larger $\alpha$ makes the composition more skewed, so more types are set to $p_{\min}$: `r paste(n_pinned, collapse = ", ")` types for $\alpha = `r paste(config$alpha, collapse = ", ")`$ respectively. Each scenario $(\alpha, N, n)$ is simulated $B$ times. @tbl-setup lists all settings.
+
+\newpage
+
+```{r}
+#| label: tbl-setup
+#| tbl-cap: "Simulation settings (`simulation_dm_errorchoice_pmin_defaults()`)."
+
+setup_table <- data.frame(
+  Parameter = c(
+    "alpha (Beta shape)", "K (cell types)", "B (replicates per scenario)", "Concentration c",
+    "Proportion method", "p_min",
+    "N (people per replicate)", "n per person, sweep", "n per person, threshold sweep",
+    "tau_AE (fixed)", "tau_ARE (fixed)", "Target success rate", "Seed"
+  ),
+  Value = c(
+    paste(config$alpha, collapse = ", "),
+    K,
+    format(config$B, big.mark = ","),
+    c_conc,
+    config$proportion_method,
+    p_min,
+    paste(config$n_people, collapse = ", "),
+    sprintf("%s to %s (%d log-spaced values)",
+            format(min(n_grid), big.mark = ",", scientific = FALSE),
+            format(max(n_grid), big.mark = ",", scientific = FALSE),
+            length(n_grid)),
+    format(n_fixed, big.mark = ",", scientific = FALSE),
+    tau_AE,
+    tau_ARE,
+    config$target,
+    config$seed
+  )
+)
+knitr::kable(setup_table, booktabs = TRUE)
+```
+
+```{r}
+#| label: tbl-p
+#| tbl-cap: !expr 'sprintf("Population mean proportions $p_j$ per cell type (columns) for each $\\alpha$ (rows). The smallest type and every type that would fall below $p_{\\min} = %s$ are set to exactly %s, so %s types are set to $p_{\\min}$ for $\\alpha = %s$ respectively.", p_min, p_min, paste(n_pinned, collapse = ", "), paste(config$alpha, collapse = ", "))'
+
+p_print <- p_mat
+colnames(p_print) <- seq_len(K)
+p_print <- formatC(p_print, digits = 2, format = "g")
+rownames(p_print) <- NULL
+knitr::kable(
+  data.frame(alpha = rownames(p_mat), p_print, check.names = FALSE),
+  booktabs = TRUE,
+  align = "r"
+)
+```
+
+```{r}
+#| label: fig-p-curve
+#| fig-cap: !expr 'sprintf("Construction of the population proportions: points are the proportions $p_j$ per cell type, the curve is the underlying scaled Beta curve, and the dashed line marks $p_{\\min} = %s$. One panel per $\\alpha$.", p_min)'
+#| fig-alt: "Four panels, one per alpha, showing the population proportion of each of ten cell types as points against the cell type index, together with a scaled Beta curve and a dashed horizontal line at 0.01. The proportions increase with the cell type index. For alpha equal to 2 only the smallest point lies on the dashed line; for larger alpha more of the smallest points lie exactly on the line, and the largest proportions are higher."
+#| fig-height: 4.5
+
+plot_proportions_curve(result)
+```
+
+# Simulation results {#sec-results}
+
+## Success rate versus threshold
+
+@fig-tau-ae and @fig-tau-are show the success rate as a function of the threshold $\tau$ at a fixed `r format(n_fixed, big.mark = ",", scientific = FALSE)` cells per person.
+
+```{r}
+#| label: fig-tau-ae
+#| fig-cap: !expr 'sprintf("AE success rate versus threshold $\\tau_{AE}$ at %s cells per person. One panel per $\\alpha$, one colour per number of people $N$; the dotted line marks the %s%% target.", format(n_fixed, big.mark = ",", scientific = FALSE), 100 * config$target)'
+#| fig-alt: "Four panels, one per alpha, showing the AE success rate vs the threshold."
+
+plot_success_vs_tau(
+  result$curves_tau, "AE",
+  subtitle = sprintf("n_per_person = %s, p_min = %s", n_fixed, p_min),
+  target = config$target
+)
+```
+
+```{r}
+#| label: fig-tau-are
+#| fig-cap: !expr 'sprintf("ARE success rate versus threshold $\\tau_{ARE}$ at %s cells per person.", format(n_fixed, big.mark = ",", scientific = FALSE))'
+#| fig-alt: "Four panels, one per alpha, showing the ARE success rate versus threshold."
+
+plot_success_vs_tau(
+  result$curves_tau, "ARE",
+  subtitle = sprintf("n_per_person = %s, p_min = %s", n_fixed, p_min),
+  target = config$target
+)
+```
+
+## Success rate versus cells per person
+
+@fig-n-ae and @fig-n-are fix the threshold ($\tau_{AE} = `r tau_AE`$, $\tau_{ARE} = `r tau_ARE`$) and vary the number of cells per person.
+
+```{r}
+#| label: fig-n-ae
+#| fig-cap: !expr 'sprintf("AE success rate versus cells per person (log scale) at $\\tau_{AE} = %s$. Success rises with cells per person and then reaches a plateau.", tau_AE)'
+#| fig-alt: "Four panels, one per alpha, showing AE success rate versus cells per person from 10 squared to 10 to the 8 on a log scale. Each curve rises with cells per person and then flattens at a plateau. Curves for more people lie higher, and the curves for the largest number of people reach a plateau close to 1."
+
+plot_success_vs_n(
+  result$curves_n, "AE",
+  subtitle = sprintf("tau_AE = %s, p_min = %s", tau_AE, p_min),
+  target = config$target
+)
+```
+
+```{r}
+#| label: fig-n-are
+#| fig-cap: !expr 'sprintf("ARE success rate versus cells per person (log scale) at $\\tau_{ARE} = %s$.", tau_ARE)'
+#| fig-alt: "Four panels, one per alpha, showing ARE success rate versus cells per person on a log scale. Each curve rises from a low value at 100 cells per person to 1 at a few thousand cells per person. Curves for more people rise earlier, and curves for larger alpha start lower."
+
+plot_success_vs_n(
+  result$curves_n, "ARE",
+  subtitle = sprintf("tau_ARE = %s, p_min = %s", tau_ARE, p_min),
+  target = config$target
+)
+```
+
+```{r}
+#| label: result-values
+ae_end_1 <- sapply(config$alpha, function(a) success_n(result$curves_n, "AE", a, 1, max(n_grid)))
+ae_end_max <- sapply(config$alpha, function(a) success_n(result$curves_n, "AE", a, N_max, max(n_grid)))
+```
+
+For AE, the success rate increases with the number of cells per person and with the number of people. At $\alpha = `r alpha_max`$ with a single person, it rises from `r pct(success_n(result$curves_n, "AE", alpha_max, 1, min(n_grid)), 0)` at `r sci(min(n_grid))` cells to `r pct(success_n(result$curves_n, "AE", alpha_max, 1, 1e4), 0)` at `r sci(1e4)` cells, and ends at `r pct(success_n(result$curves_n, "AE", alpha_max, 1, max(n_grid)), 0)` at `r sci(max(n_grid))` cells. With `r N_max` people the same curve reaches `r pct(success_n(result$curves_n, "AE", alpha_max, N_max, 1e4), 0)` at `r sci(1e4)` cells and ends at `r pct(success_n(result$curves_n, "AE", alpha_max, N_max, max(n_grid)), 0)`. The curves flatten, and above roughly `r sci(1e6)` cells per person extra cells hardly help. The plateau depends mainly on the number of people: with a single person it lies between `r pct(min(ae_end_1), 0)` and `r pct(max(ae_end_1), 0)` across $\alpha$, and with `r N_max` people it is at least `r pct(min(ae_end_max), 1)`.
+
+For ARE the picture is more uniform. From `r sci(1e4)` cells per person on, the success rate is at least `r pct(success_range("ARE", 1e4)[1], 1)` for every $\alpha$ and every number of people, so the `r pct(config$target, 0)` target is reached everywhere. The differences are at small $n$. At `r sci(min(n_grid))` cells with a single person, success is `r pct(success_n(result$curves_n, "ARE", alpha_min, 1, min(n_grid)), 0)` at $\alpha = `r alpha_min`$ and falls to `r pct(success_n(result$curves_n, "ARE", alpha_max, 1, min(n_grid)), 0)` at $\alpha = `r alpha_max`$. With `r N_max` people the values are `r pct(success_n(result$curves_n, "ARE", alpha_min, N_max, min(n_grid)), 0)` and `r pct(success_n(result$curves_n, "ARE", alpha_max, N_max, min(n_grid)), 0)`. For comparison, without a bound the smallest proportion in the original simulation falls to about $3 \cdot 10^{-6}$ at $\alpha = 5$; here it is never below $`r p_min`$.

@@ -186,7 +186,8 @@ run_sample_size_experiment <- function(
 #' Validates `p_max` (for `proportion_method = "fixed_max_beta"`), builds the alpha x p_max grid (alpha varies
 #' fastest) and calls `generate_proportions()` once per row. `generate_proportions()` is RNG-free, so calling it
 #' up front does not change any random draws made later by the simulation. When several `p_max` values are given,
-#' impossible fixed-max combinations are skipped (`generate_props_fixed_max_beta()` warns once per combination);
+#' fixed-max combinations with `K * p_max < 1` are skipped (`generate_props_fixed_max_beta()` warns once per
+#' combination);
 #' otherwise the error is propagated. Stops if no combination is feasible.
 #'
 #' @return A list with `grid` (data.frame with `alpha`, `p_max` (NA unless fixed-max), `population_id`),
@@ -395,6 +396,8 @@ run_dirichlet_multinomial_experiment <- function(
 #'   studied independently of one another.
 #' @param proportion_method Proportion-generation method forwarded to `generate_proportions()` (default
 #'   `"beta"`).
+#' @param p_min,p_max Optional bounds forwarded to `generate_proportions()` (`p_min` for `"fixed_min_beta"`,
+#'   `p_max` for `"fixed_max_beta"`); `NULL` (default) when the method does not need them.
 #' @param n_people Positive integer vector; number(s) of people per replicate.
 #' @param n_per_person Positive integer vector; number(s) of cells sampled per person.
 #' @param concentration Positive numeric scalar; Dirichlet concentration parameter (shared by every scenario).
@@ -403,8 +406,8 @@ run_dirichlet_multinomial_experiment <- function(
 #'
 #' @return List with elements:
 #'   \describe{
-#'     \item{inputs}{All input arguments (`alpha`, `K`, `B`, `metrics`, `proportion_method`, `n_people`,
-#'       `n_per_person`, `concentration`, `seed`).}
+#'     \item{inputs}{All input arguments (`alpha`, `K`, `B`, `metrics`, `proportion_method`, `p_min`,
+#'       `p_max`, `n_people`, `n_per_person`, `concentration`, `seed`).}
 #'     \item{p_table}{Data.frame with one row per alpha and columns `alpha`, `cell_type_1`, ..., `cell_type_K`.}
 #'     \item{stats}{Data.frame with one row per (alpha, n_people, n_per_person, metric, replicate) and columns
 #'       `alpha`, `n_people`, `concentration`, `n_per_person`, `metric`, `replicate`, `stat`.}
@@ -415,6 +418,8 @@ run_dm_errorchoice_experiment <- function(
   B,
   metrics,
   proportion_method = "beta",
+  p_min = NULL,
+  p_max = NULL,
   n_people,
   n_per_person,
   concentration,
@@ -427,10 +432,10 @@ run_dm_errorchoice_experiment <- function(
   n_per_person <- validate_positive_integer(n_per_person, "n_per_person", allow_vector = TRUE)
   concentration <- validate_positive_numeric(concentration, "concentration")
 
-  # p is a deterministic function of alpha (and K, proportion_method), so it is computed once per alpha and
+  # p is a deterministic function of alpha (and K, proportion_method, p_min, p_max), so it is computed once per alpha and
   # reused across every n_people / n_per_person scenario for that alpha.
   p_list <- lapply(alpha, function(a) {
-    generate_proportions(alpha = a, K = K, method = proportion_method)
+    generate_proportions(alpha = a, K = K, method = proportion_method, p_max = p_max, p_min = p_min)
   })
 
   pairs <- expand.grid(
@@ -509,6 +514,8 @@ run_dm_errorchoice_experiment <- function(
       B = B,
       metrics = metrics,
       proportion_method = proportion_method,
+      p_min = p_min,
+      p_max = p_max,
       n_people = n_people,
       n_per_person = n_per_person,
       concentration = concentration,
