@@ -31,12 +31,45 @@ test_that("plot_proportions_curve returns a ggplot for fixed_max_beta results", 
   expect_s3_class(plot_proportions_curve(plot_res_fixed()), "ggplot")
 })
 
-test_that("fixed_max_beta proportions plot keeps the fixed maximum off the curve", {
-  b <- ggplot2::ggplot_build(plot_proportions_curve(plot_res_fixed()))
-  curve_x <- b$data[[1]]$x
-  point_x <- b$data[[2]]$x
-  expect_true(any(abs(point_x - 1) < 1e-12))
-  expect_false(any(abs(curve_x - 1) < 1e-12))
+test_that("fixed_max_beta proportions plot puts points on the beta grid with unpinned points on the curve", {
+  res <- plot_res_fixed()
+  b <- ggplot2::ggplot_build(plot_proportions_curve(res))
+  curve <- b$data[[1]]
+  pts <- b$data[[2]]
+  expect_equal(pts$x, default_beta_grid(10L))
+  p_max <- res$p_table$p_max[[1]]
+  unpinned <- abs(pts$y - p_max) > 1e-9
+  expect_true(any(!unpinned))
+  expect_true(any(unpinned))
+  on_curve <- stats::approx(curve$x, curve$y, xout = pts$x[unpinned])$y
+  expect_equal(on_curve, pts$y[unpinned], tolerance = 1e-3)
+})
+
+test_that("fixed_max_beta proportions plot draws a dashed hline at the bound", {
+  res <- plot_res_fixed()
+  b <- ggplot2::ggplot_build(plot_proportions_curve(res))
+  hline <- Filter(function(d) "yintercept" %in% names(d), b$data)
+  expect_length(hline, 1L)
+  expect_equal(unique(hline[[1]]$yintercept), res$p_table$p_max[[1]])
+})
+
+test_that("fixed_min_beta proportions plot works from a minimal dm_errorchoice-style result", {
+  props <- generate_proportions(alpha = 3, K = 10L, method = "fixed_min_beta", p_min = 0.01)
+  props5 <- generate_proportions(alpha = 5, K = 10L, method = "fixed_min_beta", p_min = 0.01)
+  p_table <- data.frame(alpha = c(3, 5), rbind(props, props5))
+  names(p_table) <- c("alpha", paste0("cell_type_", 1:10))
+  res <- list(inputs = list(proportion_method = "fixed_min_beta", p_min = 0.01), p_table = p_table)
+  p <- plot_proportions_curve(res)
+  expect_s3_class(p, "ggplot")
+  b <- ggplot2::ggplot_build(p)
+  pts <- b$data[[2]]
+  expect_equal(unique(pts$x), default_beta_grid(10L))
+  hline <- Filter(function(d) "yintercept" %in% names(d), b$data)
+  expect_equal(unique(hline[[1]]$yintercept), 0.01)
+  expect_error(
+    plot_proportions_curve(list(inputs = list(proportion_method = "fixed_min_beta"), p_table = p_table)),
+    "p_min"
+  )
 })
 
 test_that("plot_success_rate_curve supports p_max filtering", {

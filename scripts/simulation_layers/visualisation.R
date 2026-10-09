@@ -8,10 +8,18 @@
 
 #' Plot true-proportion points with their underlying Beta-shaped curves.
 #'
-#' @param result Output list from `run_simulation_experiment()`.
+#' @param result List with `inputs` (containing `proportion_method`, and `p_max` / `p_min` for the fixed methods) and
+#'   `p_table` (an `alpha` column plus `cell_type_1` ... `cell_type_K`). Accepts the output of
+#'   `run_simulation_experiment()` and of `run_simulation_dm_errorchoice()`.
 #'
-#' @return A ggplot object. For Beta proportions, facets are by alpha.
-#'    For fixed-max Beta proportions,facets are by p_max (rows) and alpha (columns).
+#' @details `proportion_method` is "beta", "fixed_max_beta" or "fixed_min_beta". Points sit at
+#'   `default_beta_grid(K)`. For the fixed methods the bound (p_max / p_min) is taken from the matching `p_table`
+#'   column when present and finite, otherwise from `result$inputs` (which must then hold a single number). The
+#'   curve is the Beta curve scaled by the common factor of the unpinned types (entries not equal to the bound),
+#'   so it passes through those points, and a dashed horizontal line marks the bound.
+#'
+#' @return A ggplot object. Facets are by alpha (columns). For fixed methods whose bound comes from a `p_table`
+#'    column, rows are facetted by that bound.
 plot_proportions_curve <- function(result) {
   validate_result_fields(result, c("inputs", "p_table"))
   if (!("proportion_method" %in% names(result$inputs))) {
@@ -31,56 +39,53 @@ plot_proportions_curve <- function(result) {
   }
 
   method <- result$inputs$proportion_method
-  if (!method %in% c("beta", "fixed_max_beta")) {
+  if (!is.character(method) || length(method) != 1L || !method %in% c("beta", "fixed_max_beta", "fixed_min_beta")) {
     stop("Unsupported proportion_method in result$inputs.", call. = FALSE)
+  }
+  is_fixed <- method %in% c("fixed_max_beta", "fixed_min_beta")
+  bound_name <- if (identical(method, "fixed_min_beta")) "p_min" else "p_max"
+
+  # Bound source: p_table column when present and finite, else a single number in result$inputs.
+  bound_from_table <- FALSE
+  bound_input <- NA_real_
+  if (is_fixed) {
+    bound_from_table <- bound_name %in% names(p_table) && all(is.finite(as.numeric(p_table[[bound_name]])))
+    if (!bound_from_table) {
+      bound_input <- result$inputs[[bound_name]]
+      if (!is.numeric(bound_input) || length(bound_input) != 1L || !is.finite(bound_input)) {
+        stop(
+          "For ", method, ", result$p_table must contain finite ", bound_name, " values or result$inputs$",
+          bound_name, " must be a single number.",
+          call. = FALSE
+        )
+      }
+    }
   }
 
   K <- length(cell_type_cols)
+  grid <- default_beta_grid(K)
+  s <- seq(0, 1, length.out = 1000)
   n_rows <- nrow(p_table)
   curve_rows <- vector("list", n_rows)
   point_rows <- vector("list", n_rows)
-  curve_upper_bound <- NA_real_
-  if (identical(method, "fixed_max_beta")) {
-    curve_upper_bound <- default_beta_grid(K - 1L)[K - 1L]
-  }
 
   for (i in seq_len(n_rows)) {
     alpha_i <- as.numeric(p_table$alpha[[i]])
     p_i <- as.numeric(p_table[i, cell_type_cols, drop = FALSE])
-    p_max_i <- if ("p_max" %in% names(p_table)) as.numeric(p_table$p_max[[i]]) else NA_real_
+    bound_i <- if (!is_fixed) NA_real_ else if (bound_from_table) as.numeric(p_table[[bound_name]][[i]]) else bound_input
 
-    if (identical(method, "beta")) {
-      grid_i <- default_beta_grid(K)
-      w <- dbeta(grid_i, shape1 = alpha_i, shape2 = 1)
-      s <- seq(0, 1, length.out = 1000)
-      f <- dbeta(s, shape1 = alpha_i, shape2 = 1) / sum(w)
-      x_points <- grid_i
-    } else {
-      fixed_max_point_x <- 1
-      if (!is.finite(p_max_i)) {
-        stop("result$p_table must contain finite p_max values for fixed_max_beta.", call. = FALSE)
+    w <- dbeta(grid, shape1 = alpha_i, shape2 = 1)
+    scale_i <- 1
+    if (is_fixed) {
+      unpinned <- abs(p_i - bound_i) > 1e-9
+      if (any(unpinned) && sum(w[unpinned]) > 0) {
+        scale_i <- sum(p_i[unpinned]) / (sum(w[unpinned]) / sum(w))
       }
-      grid_i <- default_beta_grid(K - 1L)
-      w <- dbeta(grid_i, shape1 = alpha_i, shape2 = 1)
-      s <- seq(0, curve_upper_bound, length.out = 1000)
-      f <- (1 - p_max_i) * dbeta(s, shape1 = alpha_i, shape2 = 1) / sum(w)
-      x_points <- c(grid_i, fixed_max_point_x)
     }
+    f <- scale_i * dbeta(s, shape1 = alpha_i, shape2 = 1) / sum(w)
 
-    curve_rows[[i]] <- data.frame(
-      alpha = alpha_i,
-      p_max = p_max_i,
-      s = s,
-      f = f,
-      stringsAsFactors = FALSE
-    )
-    point_rows[[i]] <- data.frame(
-      alpha = alpha_i,
-      p_max = p_max_i,
-      x = x_points,
-      p = p_i,
-      stringsAsFactors = FALSE
-    )
+    curve_rows[[i]] <- data.frame(alpha = alpha_i, bound = bound_i, s = s, f = f, stringsAsFactors = FALSE)
+    point_rows[[i]] <- data.frame(alpha = alpha_i, bound = bound_i, x = grid, p = p_i, stringsAsFactors = FALSE)
   }
 
   curve_df <- do.call(rbind, curve_rows)
@@ -88,10 +93,11 @@ plot_proportions_curve <- function(result) {
   alpha_levels <- unique(p_table$alpha)
   curve_df$alpha <- factor(curve_df$alpha, levels = alpha_levels)
   point_df$alpha <- factor(point_df$alpha, levels = alpha_levels)
-  if (identical(method, "fixed_max_beta") && "p_max" %in% names(p_table)) {
-    p_max_levels <- unique(p_table$p_max)
-    curve_df$p_max <- factor(curve_df$p_max, levels = p_max_levels)
-    point_df$p_max <- factor(point_df$p_max, levels = p_max_levels)
+  facet_rows <- is_fixed && bound_from_table
+  if (facet_rows) {
+    bound_levels <- unique(curve_df$bound)
+    curve_df$bound <- factor(curve_df$bound, levels = bound_levels)
+    point_df$bound <- factor(point_df$bound, levels = bound_levels)
   }
 
   proportions_plot <- ggplot2::ggplot(curve_df, ggplot2::aes(x = s, y = f)) +
@@ -111,8 +117,26 @@ plot_proportions_curve <- function(result) {
       title = "True proportions and Beta-shaped curves"
     )
 
-  if (identical(method, "fixed_max_beta")) {
-    proportions_plot <- proportions_plot + ggplot2::facet_grid(rows = ggplot2::vars(p_max), cols = ggplot2::vars(alpha))
+  if (is_fixed) {
+    if (facet_rows) {
+      hline_df <- unique(point_df[, "bound", drop = FALSE])
+      hline_df$bound_value <- as.numeric(as.character(hline_df$bound))
+    } else {
+      hline_df <- data.frame(bound_value = bound_input)
+    }
+    proportions_plot <- proportions_plot +
+      ggplot2::geom_hline(
+        data = hline_df,
+        ggplot2::aes(yintercept = bound_value),
+        inherit.aes = FALSE,
+        linetype = "dashed",
+        color = "grey40"
+      )
+  }
+
+  if (facet_rows) {
+    proportions_plot <- proportions_plot +
+      ggplot2::facet_grid(rows = ggplot2::vars(bound), cols = ggplot2::vars(alpha))
   } else {
     proportions_plot <- proportions_plot + ggplot2::facet_grid(cols = ggplot2::vars(alpha))
   }
