@@ -40,7 +40,7 @@ P1 pass done on branch `fix/p1-broken-code` (2026-10-01); all P1 items resolved,
 
 ## P2: Efficiency
 
-- [ ] **Slim the Dirichlet-multinomial replicate output.**
+- [x] **Slim the Dirichlet-multinomial replicate output.**
   - Currently each replicate ([simulation.R:563-577](scripts/simulation_layers/simulation.R#L563-L577)) builds a
     14-column data frame with one row per person × cell type × metric (count and proportion columns repeated per
     metric), and the B frames are combined with `do.call(rbind, …)`.
@@ -49,17 +49,27 @@ P1 pass done on branch `fix/p1-broken-code` (2026-10-01); all P1 items resolved,
   - Change: each replicate returns the pooled K-vector; build a B × K matrix; compute each replicate's max error with
     matrix operations; make `person_results` optional.
   - Likely the main cost of `run_dm_errorchoice_experiment` (about 520 scenarios at B = 1000). Profile before and after.
-- [ ] **Stop rebuilding data in the multinomial success path.**
+  Resolved: the DM runner returns pooled `phat` (B × K) and `max_errors` (B × M) via the new `pooled_error_stat()`;
+  `person_results` is opt-in (`keep_person_results = TRUE`, no `error` column); DM metrics restricted to AE/ARE;
+  `CACHE_SCHEMA` bumped to 3 (results are statistically equivalent, not seed-identical). Benchmark (reduced
+  dm_errorchoice: 3 alphas × n_people {10, 50, 200} × n_per_person 1e2–1e6, B = 1000, best of 2): 145.7 s → 26.5 s
+  (5.5×), including the vectorised Dirichlet draws. Success rates old vs new: 270 comparisons, max |z| = 2.73.
+- [x] **Stop rebuilding data in the multinomial success path.**
   [simulation.R:772-794](scripts/simulation_layers/simulation.R#L772-L794) builds a B × K × M long data frame just to
   call `replicate_success()`. With one person the pooled rule equals `rep_out$max_errors[, m] <= tau`, which is already
   computed.
+  Resolved: `simulate_success_at_n()` applies `pooled_error_stat()`/`pass_from_max_errors()` to `rep_out$phat`
+  (not `rep_out$max_errors`, which gives NaN instead of 0 for ARE 0/0).
 - [ ] **Parallelism on Windows.** [`replicate_cores()`](scripts/simulation_layers/simulation.R#L328) returns 1 on
   Windows, so all runs are serial. The streams don't depend on the worker, so a PSOCK/`parLapply` backend would keep
   results reproducible. The layer functions need to be sourced on each worker.
-- [ ] **Vectorise the Dirichlet draws.** One `rgamma` call over `n_people × K` values followed by `rowSums`, instead of a
+  Deferred: to be decided in a separate PR now that the P2 timings are known.
+- [x] **Vectorise the Dirichlet draws.** One `rgamma` call over `n_people × K` values followed by `rowSums`, instead of a
   `vapply` over people that re-validates its input on every call.
-- [ ] **Replace the per-scenario `lapply` filter** in `extract_success_rate()`
+  Resolved: one `rgamma` call per replicate over `n_people × K` values; `sample_dirichlet()` removed.
+- [x] **Replace the per-scenario `lapply` filter** in `extract_success_rate()`
   ([extraction.R:365](scripts/simulation_layers/extraction.R#L365)) with one `rowsum`/`aggregate` pass.
+  Resolved: one `rowsum` pass; output identical.
 
 ## P3: Structure and consistency
 

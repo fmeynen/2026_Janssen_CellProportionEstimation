@@ -213,26 +213,6 @@ simulate_counts_multinomial <- function(p, n) {
   as.integer(rmultinom(1L, size = n, prob = p))
 }
 
-#' Draw one composition from a Dirichlet distribution.
-#'
-#' @param concentration_parameters Positive Dirichlet concentration parameters.
-#'
-#' @return Numeric vector on the simplex with the same length as
-#'   `concentration_parameters`.
-sample_dirichlet <- function(concentration_parameters) {
-  concentration_parameters <- validate_positive_numeric(
-    concentration_parameters,
-    "concentration_parameters",
-    allow_vector = TRUE
-  )
-  draws <- stats::rgamma(length(concentration_parameters), shape = concentration_parameters, rate = 1)
-  total <- sum(draws)
-  if (!is.finite(total) || total <= 0) {
-    stop("Dirichlet sampling produced an invalid total gamma draw.", call. = FALSE)
-  }
-  draws / total
-}
-
 #' Simulate person-level counts from a Dirichlet-multinomial hierarchy.
 #'
 #' @param p Population mean proportion vector.
@@ -249,11 +229,23 @@ simulate_counts_dirichlet_multinomial <- function(p, n_people, n_per_person, con
   concentration <- validate_positive_numeric(concentration, "concentration")
 
   K <- length(p)
-  person_true_proportions <- t(vapply(
-    seq_len(n_people),
-    function(person_id) sample_dirichlet(concentration * p),
-    FUN.VALUE = numeric(K)
-  ))
+  concentration_parameters <- validate_positive_numeric(
+    concentration * p,
+    "concentration_parameters",
+    allow_vector = TRUE
+  )
+  # One Dirichlet draw per person via normalised gammas, drawn in a single call. The matrix fills column-major, so
+  # column k holds the n_people draws with shape concentration_parameters[k].
+  gamma_draws <- matrix(
+    stats::rgamma(n_people * K, shape = rep(concentration_parameters, each = n_people), rate = 1),
+    nrow = n_people,
+    ncol = K
+  )
+  totals <- rowSums(gamma_draws)
+  if (any(!is.finite(totals) | totals <= 0)) {
+    stop("Dirichlet sampling produced an invalid total gamma draw.", call. = FALSE)
+  }
+  person_true_proportions <- gamma_draws / totals
   counts <- t(vapply(
     seq_len(n_people),
     function(person_id) simulate_counts_multinomial(person_true_proportions[person_id, ], n_per_person),
@@ -504,29 +496,51 @@ replicate_apply <- function(streams, FUN) {
 # Coordinate Simulation --------------------------------------------------------------------------------------------
 
 
-#' Run B Dirichlet-multinomial replicates and store person-level error results.
+#' Run B Dirichlet-multinomial replicates and store the pooled estimates and their error statistics.
+#'
+#' Per replicate, the observed per-person proportions are averaged over persons, giving the pooled estimate (one
+#' row of `phat`). The per-replicate error statistic for each metric is then `pooled_error_stat(phat, p, metric)`,
+#' the single source of truth for the success rule. The long per-person data.frame is only built on request
+#' (`keep_person_results = TRUE`), because it has B x n_people x K x M rows.
 #'
 #' @param p             Population mean proportion vector (length K).
 #' @param B             Number of replicates.
-#' @param metrics       Error metrics to compute; any subset of `c("AE", "ARE", "TSE", "LAE")`.
+#' @param metrics       Error metrics to compute; any subset of `c("AE", "ARE")` (the pooled success rule is defined
+#'   for these only; anything else is an error).
 #' @param n_people      Number of people per replicate.
 #' @param n_per_person  Number of cells sampled for each person.
 #' @param concentration Positive Dirichlet concentration parameter.
 #' @param scenario_id   Optional scenario identifier copied into every row of `person_results`.
 #' @param seed          Optional integer seed for reproducibility.
+#' @param keep_person_results Logical; if `TRUE`, also return the long per-person `person_results` data.frame.
 #'
-#' @return List with elements:
+#' @return List with elements (M = `length(metrics)`):
 #'   \describe{
-#'     \item{person_results}{Tidy data.frame with one row per replicate x person x cell type x metric, and columns
-#'       `scenario_id`, `n_people`, `concentration`, `replicate`, `person_id`, `cell_type`, `metric`, `count`,
-#'       `observed_proportion`, `person_true_proportion`, `population_mean_proportion` and `error` (the person's
-#'       error for that cell type and metric, measured against `person_true_proportion`).}
-#'     \item{inputs}{Copy of the input arguments (including seed used), with `model = "dirichlet_multinomial"`.}
+#'     \item{phat}{B x K numeric matrix; row b is replicate b's pooled estimate (observed proportions averaged over
+#'       persons).}
+#'     \item{max_errors}{B x M numeric matrix (columns named by metric); `max_errors[, m]` is
+#'       `pooled_error_stat(phat, p, m)`.}
+#'     \item{person_results}{Only when `keep_person_results = TRUE`. Tidy data.frame with one row per replicate x
+#'       person x cell type x metric, and columns `scenario_id`, `n_people`, `concentration`, `replicate`,
+#'       `person_id`, `cell_type`, `metric`, `count`, `observed_proportion`, `person_true_proportion` and
+#'       `population_mean_proportion`.}
+#'     \item{inputs}{Copy of the input arguments (including seed used and `keep_person_results`), with
+#'       `model = "dirichlet_multinomial"`.}
 #'   }
 run_replicates_dirichlet_multinomial <- function(p, B, metrics,
                                                  n_people, n_per_person,
                                                  concentration, scenario_id = NA_character_,
-                                                 seed = NULL) {
+                                                 seed = NULL,
+                                                 keep_person_results = FALSE) {
+  if (!is.character(metrics) || length(metrics) < 1L || anyNA(metrics) || !all(metrics %in% c("AE", "ARE"))) {
+    stop(
+      "metrics must be a non-empty subset of c(\"AE\", \"ARE\") for model = 'dirichlet_multinomial'.",
+      call. = FALSE
+    )
+  }
+  if (!is.logical(keep_person_results) || length(keep_person_results) != 1L || is.na(keep_person_results)) {
+    stop("keep_person_results must be TRUE or FALSE.", call. = FALSE)
+  }
   B             <- validate_positive_integer(B, "B")
   n_people      <- validate_positive_integer(n_people, "n_people")
   n_per_person  <- validate_positive_integer(n_per_person, "n_per_person")
@@ -534,22 +548,22 @@ run_replicates_dirichlet_multinomial <- function(p, B, metrics,
   validate_proportions(p)
 
   K <- length(p)
-  M <- length(metrics)
 
-  # Row order within one replicate's data.frame: person_id (outer), metric, cell_type (inner) --
-  # matching expand.grid()'s fastest-first variation of its first argument.
-  grid <- expand.grid(
-    cell_type = seq_len(K),
-    metric    = metrics,
-    person_id = seq_len(n_people),
-    KEEP.OUT.ATTRS   = FALSE,
-    stringsAsFactors = FALSE
-  )
-  idx_person_cell <- cbind(grid$person_id, grid$cell_type)
-  metric_index    <- match(grid$metric, metrics)
+  # Row order within one replicate's person-level data.frame: person_id (outer), metric, cell_type (inner) --
+  # matching expand.grid()'s fastest-first variation of its first argument. Only needed when keep_person_results.
+  if (keep_person_results) {
+    grid <- expand.grid(
+      cell_type = seq_len(K),
+      metric    = metrics,
+      person_id = seq_len(n_people),
+      KEEP.OUT.ATTRS   = FALSE,
+      stringsAsFactors = FALSE
+    )
+    idx_person_cell <- cbind(grid$person_id, grid$cell_type)
+  }
 
   streams <- replicate_streams(seed, B)
-  replicate_frames <- replicate_apply(streams, function(b) {
+  replicate_results <- replicate_apply(streams, function(b) {
     draw <- simulate_counts(
       p = p,
       model = "dirichlet_multinomial",
@@ -557,47 +571,57 @@ run_replicates_dirichlet_multinomial <- function(p, B, metrics,
       n_per_person = n_per_person,
       concentration = concentration
     )
-    counts      <- draw$counts
-    person_p    <- draw$person_true_proportions
-    observed_p  <- counts_to_proportions(counts, n_per_person)
-    errors_list <- compute_errors(observed_p, person_p, metrics = metrics, n = n_per_person)
+    counts     <- draw$counts
+    observed_p <- counts_to_proportions(counts, n_per_person)
+    pooled     <- colMeans(observed_p)
 
-    errors_3d <- array(NA_real_, dim = c(n_people, K, M))
-    for (mi in seq_len(M)) {
-      errors_3d[, , mi] <- errors_list[[metrics[[mi]]]]
+    if (!keep_person_results) {
+      return(list(pooled = pooled))
     }
-
-    data.frame(
-      scenario_id                = scenario_id,
-      n_people                   = n_people,
-      concentration              = concentration,
-      replicate                  = b,
-      person_id                  = grid$person_id,
-      cell_type                  = grid$cell_type,
-      metric                     = grid$metric,
-      count                      = as.integer(counts[idx_person_cell]),
-      observed_proportion        = observed_p[idx_person_cell],
-      person_true_proportion     = person_p[idx_person_cell],
-      population_mean_proportion = p[grid$cell_type],
-      error                      = errors_3d[cbind(grid$person_id, grid$cell_type, metric_index)],
-      stringsAsFactors = FALSE
+    person_p <- draw$person_true_proportions
+    list(
+      pooled = pooled,
+      person_results = data.frame(
+        scenario_id                = scenario_id,
+        n_people                   = n_people,
+        concentration              = concentration,
+        replicate                  = b,
+        person_id                  = grid$person_id,
+        cell_type                  = grid$cell_type,
+        metric                     = grid$metric,
+        count                      = as.integer(counts[idx_person_cell]),
+        observed_proportion        = observed_p[idx_person_cell],
+        person_true_proportion     = person_p[idx_person_cell],
+        population_mean_proportion = p[grid$cell_type],
+        stringsAsFactors = FALSE
+      )
     )
   })
 
-  list(
-    person_results = do.call(rbind, replicate_frames),
-    inputs = list(
-      p = p,
-      B = B,
-      metrics = metrics,
-      model = "dirichlet_multinomial",
-      n_people = n_people,
-      n_per_person = n_per_person,
-      concentration = concentration,
-      scenario_id = scenario_id,
-      seed = seed
-    )
+  phat <- do.call(rbind, lapply(replicate_results, `[[`, "pooled"))
+  dimnames(phat) <- NULL
+  max_errors <- matrix(NA_real_, nrow = B, ncol = length(metrics), dimnames = list(NULL, metrics))
+  for (m in metrics) {
+    max_errors[, m] <- pooled_error_stat(phat, p, m)
+  }
+
+  out <- list(phat = phat, max_errors = max_errors)
+  if (keep_person_results) {
+    out$person_results <- do.call(rbind, lapply(replicate_results, `[[`, "person_results"))
+  }
+  out$inputs <- list(
+    p = p,
+    B = B,
+    metrics = metrics,
+    model = "dirichlet_multinomial",
+    n_people = n_people,
+    n_per_person = n_per_person,
+    concentration = concentration,
+    scenario_id = scenario_id,
+    seed = seed,
+    keep_person_results = keep_person_results
   )
+  out
 }
 
 #' Run B simulation replicates and store error results.
@@ -612,7 +636,8 @@ run_replicates_dirichlet_multinomial <- function(p, B, metrics,
 #' @param p             True proportion vector (length K); for `"dirichlet_multinomial"`, the population mean.
 #' @param n             Total sample size per replicate; required for `"multinomial"`, ignored otherwise.
 #' @param B             Number of replicates.
-#' @param metrics       Error metrics to compute; any subset of `c("AE", "ARE", "TSE", "LAE")`.
+#' @param metrics       Error metrics to compute; any subset of `c("AE", "ARE", "TSE", "LAE")` for `"multinomial"`,
+#'   and any subset of `c("AE", "ARE")` for `"dirichlet_multinomial"` (anything else is an error).
 #' @param model         Sampling model: `"multinomial"` or `"dirichlet_multinomial"`.
 #' @param tie_method    Tie-breaking rule passed to `max_error_summary()`; `"multinomial"` only.
 #' @param seed          Optional integer seed for reproducibility; used by both models.
@@ -621,9 +646,13 @@ run_replicates_dirichlet_multinomial <- function(p, B, metrics,
 #' @param concentration Positive Dirichlet concentration parameter; `"dirichlet_multinomial"` only.
 #' @param scenario_id   Optional scenario identifier included in the person-level output; `"dirichlet_multinomial"`
 #'   only.
+#' @param keep_person_results Logical; if `TRUE`, also return the long per-person `person_results` data.frame;
+#'   `"dirichlet_multinomial"` only (default `FALSE`).
 #' @param ...           Additional arguments forwarded to `simulate_counts()`; `"multinomial"` only.
 #'
-#' @return For `"dirichlet_multinomial"`, the return value of `run_replicates_dirichlet_multinomial()`. For
+#' @return For `"dirichlet_multinomial"`, the return value of `run_replicates_dirichlet_multinomial()`: `phat`
+#'   (B x K pooled estimates), `max_errors` (B x M pooled error statistics, columns named by metric), `inputs`,
+#'   and `person_results` only when `keep_person_results = TRUE`. For
 #'   `"multinomial"`, a list with elements (M = `length(metrics)`):
 #'   \describe{
 #'     \item{max_errors}{B x M numeric matrix of max error values (columns named by metric).}
@@ -641,6 +670,7 @@ run_replicates <- function(p, n = NULL, B,
                            n_per_person = NULL,
                            concentration = NULL,
                            scenario_id = NA_character_,
+                           keep_person_results = FALSE,
                            ...) {
   if (identical(model, "dirichlet_multinomial")) {
     return(run_replicates_dirichlet_multinomial(
@@ -651,7 +681,8 @@ run_replicates <- function(p, n = NULL, B,
       n_per_person = n_per_person,
       concentration = concentration,
       scenario_id = scenario_id,
-      seed = seed
+      seed = seed,
+      keep_person_results = keep_person_results
     ))
   }
   if (!identical(model, "multinomial")) {
@@ -720,7 +751,7 @@ run_replicates <- function(p, n = NULL, B,
 
 #' Simulate replicates at one sample size and derive per-replicate success.
 #'
-#' Both sampling models share a single success rule, `replicate_success()`: for each metric in `config$taus`, the
+#' Both sampling models share a single success rule, `pooled_error_stat()`: for each metric in `config$taus`, the
 #' estimated proportions are averaged over persons per (replicate, cell type), the error of that pooled estimate
 #' against the population proportion is computed, and the largest of these per-cell-type errors must be `<= tau`; a
 #' replicate succeeds jointly only if it succeeds for every metric in `config$taus`.
@@ -728,14 +759,15 @@ run_replicates <- function(p, n = NULL, B,
 #' The multinomial model has no person structure, so its observed proportions (one draw per replicate) are treated
 #' as a single synthetic person (`person_id = 1`) before being handed to `replicate_success()` — pooling over one
 #' person is a no-op, so this reduces to "every cell-type error <= tau" for that model, matching its previous
-#' behaviour. The Dirichlet-multinomial model's `person_results` (one row per replicate, person, cell type, metric)
-#' is passed to `replicate_success()` directly.
+#' behaviour. For the Dirichlet-multinomial model, `run_replicates()` already returns the per-replicate statistics
+#' `max_errors` (from `pooled_error_stat()` on the pooled estimates `phat`), and `pass_from_max_errors()` turns them
+#' into pass/fail.
 #'
 #' Metrics in `config$metrics` that have no entry in `config$taus` are simulated but do not contribute to the
 #' success criterion: `simulate_success_at_n()` warns about them once per call, and — because such metrics are
-#' simply absent from `config$taus` — `replicate_success()` never sees them and so never emits its own "metric not
-#' in person_results" warning for the same metric. That second warning path only fires for a metric that has a tau
-#' but was not simulated at all, a genuinely different (misconfiguration) case.
+#' simply absent from `config$taus` — `replicate_success()` / `pass_from_max_errors()` never see them and so never
+#' emit their own "metric not simulated" warning for the same metric. That second warning path only fires for a
+#' metric that has a tau but was not simulated at all, a genuinely different (misconfiguration) case.
 #'
 #' @param alpha  Positive scalar; Beta shape parameter used to generate the true proportions.
 #' @param n      Positive integer sample size. For `config$model == "multinomial"`, the total sample size (cells)
@@ -751,8 +783,8 @@ run_replicates <- function(p, n = NULL, B,
 #'     \item{model}{Sampling model (`"multinomial"` or `"dirichlet_multinomial"`).}
 #'     \item{n_people}{Required for `"dirichlet_multinomial"`; number of people per replicate.}
 #'     \item{concentration}{Required for `"dirichlet_multinomial"`; positive Dirichlet concentration parameter.}
-#'     \item{tie_method}{Tie-breaking rule for max-error argmax (multinomial only; unused by
-#'       `replicate_success()`, but still forwarded to `run_replicates()`).}
+#'     \item{tie_method}{Tie-breaking rule for max-error argmax (multinomial only; unused by the success rule, but
+#'       still forwarded to `run_replicates()`).}
 #'     \item{proportion_method}{Proportion-generation method.}
 #'   }
 #' @param seed   Optional integer RNG seed forwarded to `run_replicates()`; defaults to `config$seed`. Because
@@ -794,12 +826,12 @@ simulate_success_at_n <- function(alpha, n = NULL, config, seed = config$seed) {
       n_per_person  = n,
       concentration = config$concentration
     )
-    pass <- replicate_success(rep_out$person_results, config$taus)
+    pass <- pass_from_max_errors(rep_out$max_errors, config$taus)
 
     return(list(
-      success       = as.logical(pass$pass),
-      success_count = sum(pass$pass),
-      success_rate  = mean(pass$pass),
+      success       = pass,
+      success_count = sum(pass),
+      success_rate  = mean(pass),
       rep_out       = rep_out
     ))
   }
@@ -814,34 +846,22 @@ simulate_success_at_n <- function(alpha, n = NULL, config, seed = config$seed) {
     seed       = seed
   )
 
-  # rep_out$phat is a B x K matrix; flatten it into a long data.frame with a single synthetic person_id = 1 per
-  # replicate (one row per replicate/cell_type/metric) so replicate_success() can be reused for the multinomial
-  # model too. Pooling over one person is a no-op, so the rule reduces to the per-draw error against p.
-  B       <- nrow(rep_out$phat)
-  metrics <- config$metrics
-  grid <- expand.grid(
-    replicate = seq_len(B),
-    cell_type = seq_along(p),
-    metric    = metrics,
-    KEEP.OUT.ATTRS   = FALSE,
-    stringsAsFactors = FALSE
+  # The multinomial model is a single synthetic person per replicate, so pooling is a no-op and the rule reduces to
+  # the per-draw error of rep_out$phat (B x K) against p. Only metrics with a tau matter (others were warned about
+  # above); pooled_error_stat() is not defined for e.g. TSE/LAE, so those are only an error if they have a tau.
+  # (rep_out$max_errors is not used: it yields NaN rather than 0 for ARE 0/0.)
+  B            <- nrow(rep_out$phat)
+  used_metrics <- intersect(config$metrics, names(config$taus))
+  max_errors <- matrix(
+    vapply(used_metrics, function(m) pooled_error_stat(rep_out$phat, p, m), numeric(B)),
+    nrow = B, dimnames = list(NULL, used_metrics)
   )
-  person_results <- data.frame(
-    replicate                  = grid$replicate,
-    person_id                  = 1L,
-    cell_type                  = grid$cell_type,
-    metric                     = grid$metric,
-    observed_proportion        = rep_out$phat[cbind(grid$replicate, grid$cell_type)],
-    population_mean_proportion = p[grid$cell_type],
-    stringsAsFactors = FALSE
-  )
-
-  pass <- replicate_success(person_results, config$taus)
+  pass <- pass_from_max_errors(max_errors, config$taus)
 
   list(
-    success       = as.logical(pass$pass),
-    success_count = sum(pass$pass),
-    success_rate  = mean(pass$pass),
+    success       = pass,
+    success_count = sum(pass),
+    success_rate  = mean(pass),
     rep_out       = rep_out
   )
 }

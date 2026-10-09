@@ -52,10 +52,11 @@ test_that("run_replicates (dirichlet_multinomial) is reproducible given the same
     n_people = 4, n_per_person = 50, concentration = 10, seed = 55
   )
 
-  expect_identical(dm1$person_results, dm2$person_results)
+  expect_identical(dm1$phat, dm2$phat)
+  expect_identical(dm1$max_errors, dm2$max_errors)
 })
 
-test_that("run_replicates (dirichlet_multinomial) output shape and columns are correct", {
+test_that("run_replicates (dirichlet_multinomial) default output has phat and max_errors but no person_results", {
   metrics <- c("AE", "ARE")
   B <- 5L
   n_people <- 4L
@@ -66,13 +67,36 @@ test_that("run_replicates (dirichlet_multinomial) output shape and columns are c
     n_people = n_people, n_per_person = 50, concentration = 10, seed = 1
   )
 
+  expect_identical(names(dm), c("phat", "max_errors", "inputs"))
+  expect_true(is.matrix(dm$phat))
+  expect_equal(dim(dm$phat), c(B, K))
+  expect_equal(rowSums(dm$phat), rep(1, B))
+  expect_true(is.matrix(dm$max_errors))
+  expect_equal(dim(dm$max_errors), c(B, length(metrics)))
+  expect_identical(colnames(dm$max_errors), metrics)
+  expect_null(dm$person_results)
+  expect_false(dm$inputs$keep_person_results)
+})
+
+test_that("run_replicates (dirichlet_multinomial) with keep_person_results = TRUE returns person_results", {
+  metrics <- c("AE", "ARE")
+  B <- 5L
+  n_people <- 4L
+  K <- length(test_p)
+
+  dm <- run_replicates(
+    p = test_p, B = B, metrics = metrics, model = "dirichlet_multinomial",
+    n_people = n_people, n_per_person = 50, concentration = 10, seed = 1,
+    keep_person_results = TRUE
+  )
+
   expect_s3_class(dm$person_results, "data.frame")
   expect_equal(nrow(dm$person_results), B * n_people * K * length(metrics))
   expect_identical(
     colnames(dm$person_results),
     c(
       "scenario_id", "n_people", "concentration", "replicate", "person_id", "cell_type", "metric",
-      "count", "observed_proportion", "person_true_proportion", "population_mean_proportion", "error"
+      "count", "observed_proportion", "person_true_proportion", "population_mean_proportion"
     )
   )
   expect_true(is.integer(dm$person_results$count) || is.numeric(dm$person_results$count))
@@ -80,6 +104,49 @@ test_that("run_replicates (dirichlet_multinomial) output shape and columns are c
   expect_setequal(unique(dm$person_results$replicate), seq_len(B))
   expect_setequal(unique(dm$person_results$person_id), seq_len(n_people))
   expect_setequal(unique(dm$person_results$cell_type), seq_len(K))
+  expect_true(dm$inputs$keep_person_results)
+
+  # Keeping person_results does not change the draws: phat / max_errors match the default run.
+  dm_default <- run_replicates(
+    p = test_p, B = B, metrics = metrics, model = "dirichlet_multinomial",
+    n_people = n_people, n_per_person = 50, concentration = 10, seed = 1
+  )
+  expect_identical(dm$phat, dm_default$phat)
+  expect_identical(dm$max_errors, dm_default$max_errors)
+
+  # phat is the person-average of person_results' observed proportions, and the long-format rule agrees with
+  # max_errors.
+  for (m in metrics) {
+    stat <- replicate_pooled_error(dm$person_results, m)$stat
+    expect_equal(stat, unname(dm$max_errors[, m]))
+  }
+  ae <- dm$person_results[dm$person_results$metric == "AE", ]
+  pooled <- tapply(ae$observed_proportion, list(ae$replicate, ae$cell_type), mean)
+  expect_equal(unname(pooled), dm$phat)
+})
+
+test_that("run_replicates (dirichlet_multinomial) max_errors equals pooled_error_stat(phat, p, m)", {
+  metrics <- c("AE", "ARE")
+  dm <- run_replicates(
+    p = test_p, B = 7, metrics = metrics, model = "dirichlet_multinomial",
+    n_people = 3, n_per_person = 40, concentration = 8, seed = 21
+  )
+  for (m in metrics) {
+    expect_identical(unname(dm$max_errors[, m]), pooled_error_stat(dm$phat, test_p, m))
+  }
+})
+
+test_that("run_replicates (dirichlet_multinomial) rejects metrics other than AE and ARE", {
+  for (bad in list("TSE", "LAE", c("AE", "TSE"))) {
+    expect_error(
+      run_replicates(
+        p = test_p, B = 2, metrics = bad, model = "dirichlet_multinomial",
+        n_people = 2, n_per_person = 10, concentration = 5, seed = 1
+      ),
+      "subset of c(\"AE\", \"ARE\")",
+      fixed = TRUE
+    )
+  }
 })
 
 
@@ -104,11 +171,8 @@ test_that("dirichlet_multinomial replicate streams do not depend on B (first 4 o
     n_people = 4, n_per_person = 50, concentration = 10, seed = 77
   )
 
-  sub <- dm8$person_results[dm8$person_results$replicate <= 4, , drop = FALSE]
-  rownames(sub) <- NULL
-  rownames(dm4$person_results) <- NULL
-
-  expect_identical(sub, dm4$person_results)
+  expect_identical(dm8$phat[1:4, , drop = FALSE], dm4$phat)
+  expect_identical(dm8$max_errors[1:4, , drop = FALSE], dm4$max_errors)
 })
 
 

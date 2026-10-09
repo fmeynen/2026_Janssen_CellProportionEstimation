@@ -44,7 +44,7 @@ simulation_result_path <- function(config, dir, name) {
 
 # Schema version of cached results. Bump this whenever the shape of a cached result changes (columns, list elements,
 # types), so that stale files on disk are never read back as if they had the new shape.
-CACHE_SCHEMA <- 2L
+CACHE_SCHEMA <- 3L
 
 
 #' Return a cached result, or compute it and cache it.
@@ -243,6 +243,22 @@ feasible_scenarios <- function(alpha, K, proportion_method, p_max) {
 }
 
 
+#' Run the Dirichlet-multinomial branch of `run_simulation_experiment()`.
+#'
+#' One scenario per feasible (alpha, p_max) x (n_people, concentration) combination; each scenario calls
+#' `run_replicates(..., keep_person_results = TRUE)` and keeps its long person-level output.
+#'
+#' @param metrics Error metrics; any subset of `c("AE", "ARE")`. Other arguments as in `run_simulation_experiment()`.
+#'
+#' @return List with elements:
+#'   \describe{
+#'     \item{inputs}{All input arguments, with `model = "dirichlet_multinomial"`.}
+#'     \item{p_table}{Data.frame with one row per scenario: `scenario_id`, `alpha`, `p_max`, `n_people`,
+#'       `concentration`, `cell_type_1`, ..., `cell_type_K`.}
+#'     \item{person_results}{Tidy data.frame with one row per scenario x replicate x person x cell type x metric and
+#'       columns `scenario_id`, `alpha`, `p_max`, `n_people`, `concentration`, `replicate`, `person_id`, `cell_type`,
+#'       `metric`, `count`, `observed_proportion`, `person_true_proportion`, `population_mean_proportion`.}
+#'   }
 run_dirichlet_multinomial_experiment <- function(
   alpha,
   K,
@@ -303,7 +319,8 @@ run_dirichlet_multinomial_experiment <- function(
       n_people = scenario$n_people[[1L]],
       n_per_person = n_per_person,
       concentration = scenario$concentration[[1L]],
-      scenario_id = scenario$scenario_id[[1L]]
+      scenario_id = scenario$scenario_id[[1L]],
+      keep_person_results = TRUE
     )
     person_results <- rep_out$person_results
     person_results$alpha <- scenario$alpha[[1L]]
@@ -321,8 +338,7 @@ run_dirichlet_multinomial_experiment <- function(
       "count",
       "observed_proportion",
       "person_true_proportion",
-      "population_mean_proportion",
-      "error"
+      "population_mean_proportion"
     )]
     p_table_list[[i]] <- extract_p_table_row(
       scenario$alpha[[1L]],
@@ -362,11 +378,9 @@ run_dirichlet_multinomial_experiment <- function(
 #'
 #' AE and ARE are studied separately: for each scenario (one combination of `alpha`, `n_people`, `n_per_person`)
 #' and each metric, every replicate is reduced immediately to one scalar "stat" -- the max, over cell types, of the
-#' error of the person-pooled proportion estimate against the population proportion -- via
-#' `replicate_pooled_error()`. The
-#' full `person_results` produced by `run_replicates()` for a scenario are discarded as soon as they have been
-#' reduced to `stat` values, so memory use does not grow with the size of the (alpha, n_people, n_per_person)
-#' grid.
+#' error of the person-pooled proportion estimate against the population proportion -- which `run_replicates()`
+#' returns directly as `max_errors` (computed by `pooled_error_stat()`). No per-person data are kept, so memory use
+#' stays small even for large `B` and `n_people`.
 #'
 #' Common random numbers: the seed depends only on the (alpha, n_people) pair. Pairs are enumerated in the order
 #' of `expand.grid(n_people = n_people, alpha = alpha)`; the j-th pair uses `seed + j - 1L` (or `NULL` when `seed`
@@ -377,8 +391,8 @@ run_dirichlet_multinomial_experiment <- function(
 #'   population mean proportion vector (one vector per alpha, computed once and reused across the grid).
 #' @param K      Positive integer; number of cell types.
 #' @param B      Positive integer; number of replicates per scenario.
-#' @param metrics Character vector; error metrics, any of `"AE"`, `"ARE"` (forwarded to `run_replicates()` and
-#'   `replicate_pooled_error()`), studied independently of one another.
+#' @param metrics Character vector; error metrics, any of `"AE"`, `"ARE"` (forwarded to `run_replicates()`),
+#'   studied independently of one another.
 #' @param proportion_method Proportion-generation method forwarded to `generate_proportions()` (default
 #'   `"beta"`).
 #' @param n_people Positive integer vector; number(s) of people per replicate.
@@ -455,20 +469,18 @@ run_dm_errorchoice_experiment <- function(
       metric_rows <- vector("list", length(metrics))
       for (mi in seq_along(metrics)) {
         m <- metrics[[mi]]
-        stat_df <- replicate_pooled_error(rep_out$person_results, m)
         metric_rows[[mi]] <- data.frame(
           alpha = alpha_j,
           n_people = n_people_j,
           concentration = concentration,
           n_per_person = n,
           metric = m,
-          replicate = stat_df$replicate,
-          stat = stat_df$stat,
+          replicate = seq_len(B),
+          stat = unname(rep_out$max_errors[, m]),
           stringsAsFactors = FALSE
         )
       }
       stats_list[[scenario_counter]] <- do.call(rbind, metric_rows)
-      rm(rep_out) # drop person_results before moving to the next scenario (memory).
 
       message(sprintf(
         "[%d/%d] alpha=%s n_people=%d n_per_person=%d",
@@ -520,7 +532,8 @@ run_dm_errorchoice_experiment <- function(
 #' @param B          Number of replicates.
 #' @param taus       Numeric vector of thresholds (same for all metrics) or a named list with one numeric vector per
 #'      metric (e.g. `list(AE = c(...), ARE = c(...))`).
-#' @param metrics    Error metrics; any subset of `c("AE", "ARE", "TSE", "LAE")`.
+#' @param metrics    Error metrics; any subset of `c("AE", "ARE", "TSE", "LAE")` (only `"AE"` and `"ARE"` for
+#'      `model = "dirichlet_multinomial"`).
 #' @param proportion_method Proportion-generation method (`"beta"` or `"fixed_max_beta"`).
 #'    The fixed-max Beta method places `p_max` at the highest index and warns then fails for impossible combinations.
 #' @param p_max      Fixed largest true proportion(s) used by `proportion_method = "fixed_max_beta"`.
@@ -539,7 +552,8 @@ run_dm_errorchoice_experiment <- function(
 #' @param seed       Optional integer seed for reproducibility.
 #' @param ...        Additional arguments forwarded to `simulate_counts()`.
 #'
-#' @return List with elements:
+#' @return For `model = "dirichlet_multinomial"`, the return value of `run_dirichlet_multinomial_experiment()`
+#'   (`inputs`, `p_table`, `person_results`). For `model = "multinomial"`, a list with elements:
 #'   \describe{
 #'     \item{inputs}{All input arguments.}
 #'     \item{p_table}{Data.frame with one row per simulated alpha/p_max combination,

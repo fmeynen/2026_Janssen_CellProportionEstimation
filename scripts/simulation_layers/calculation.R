@@ -193,7 +193,8 @@ default_tau_grid <- function(stat, n_points = 200, prob = 0.999) {
 #'
 #' Included in the cache keys of experiments whose cached results depend on the rule (`run_sample_size_experiment()`,
 #' `run_dm_errorchoice_experiment()`), so that changing the rule never silently reuses results computed under an
-#' earlier one. Change this string whenever `replicate_pooled_error()` changes what it computes.
+#' earlier one. Change this string whenever `pooled_error_stat()` or `replicate_pooled_error()` changes what it
+#' computes.
 #'
 #' @return Character scalar.
 success_rule_id <- function() {
@@ -201,21 +202,77 @@ success_rule_id <- function() {
 }
 
 
-#' Compute the per-replicate pooled-proportion error statistic for one metric.
+#' Compute the pooled-proportion error statistic from a matrix of pooled estimates.
 #'
-#' Single source of truth for the success statistic used by `replicate_success()` (and by any caller that needs the
-#' raw per-replicate statistic, e.g. to evaluate many tau thresholds via `mean(stat <= tau)` without
-#' recomputation). Per (scenario, replicate, cell type j), the estimated proportions are first averaged over persons,
-#' giving the pooled estimate `pbar_j`, which is compared with the population-level true proportion `p_j`:
+#' Single source of truth for the replicate success rule. Each row of `pbar` is one replicate's pooled estimate
+#' (the estimated proportions averaged over persons), and each column is a cell type j. Per row, every cell type's
+#' pooled estimate `pbar_j` is compared with the population-level true proportion `p_j`:
 #'   * AE:  `|pbar_j - p_j|`
 #'   * ARE: `|pbar_j - p_j| / p_j`
 #' The largest of these cell-type errors is the per-replicate "stat"; a replicate passes the metric iff
 #' `stat <= tau`. `NaN` (ARE with `pbar_j` and `p_j` both 0) counts as 0; `Inf` (ARE with `p_j = 0` and
-#' `pbar_j > 0`) is kept. With a single person per replicate this reduces to the per-draw error against `p`.
+#' `pbar_j > 0`) is kept. `NA` errors are ignored in the max; a row whose errors are all `NA` gives `NA`.
 #'
-#' The computation is fully vectorised: integer group keys, `rowsum()` for the per-cell-type means, and a single
-#' `order()` + `duplicated()` pass for the max-by-group step. There is no `stats::aggregate()` call, no
-#' `tapply()`, and no per-row loop.
+#' The computation is vectorised over the whole matrix, followed by a column-wise `pmax()`; there is no per-row loop.
+#'
+#' @param pbar Numeric matrix, B x K: one row per replicate, one column per cell type.
+#' @param p    True proportions: a numeric vector of length K (the same `p` for every row), or a numeric B x K matrix
+#'   (one `p` per row, e.g. when rows come from different scenarios).
+#' @param metric Single metric name, `"AE"` or `"ARE"`.
+#'
+#' @return Unnamed numeric vector of length B: per row, the max over cell types of the error.
+pooled_error_stat <- function(pbar, p, metric) {
+  if (!is.matrix(pbar) || !is.numeric(pbar) || ncol(pbar) < 1L) {
+    stop("pbar must be a numeric matrix (replicates x cell types) with at least one column.", call. = FALSE)
+  }
+  if (!is.numeric(p)) {
+    stop("p must be numeric.", call. = FALSE)
+  }
+  if (is.matrix(p)) {
+    if (!identical(dim(p), dim(pbar))) {
+      stop("When p is a matrix it must have the same dimensions as pbar.", call. = FALSE)
+    }
+  } else if (length(p) != ncol(pbar)) {
+    stop("p must have one entry per column of pbar.", call. = FALSE)
+  }
+  if (!is.character(metric) || length(metric) != 1L || is.na(metric)) {
+    stop("metric must be a single character string.", call. = FALSE)
+  }
+  if (!metric %in% c("AE", "ARE")) {
+    stop(sprintf("The pooled success rule is defined for AE and ARE only, not '%s'.", metric), call. = FALSE)
+  }
+
+  B <- nrow(pbar)
+  # A length-K p is recycled down the columns (each p_j repeated B times), matching pbar's column-major layout.
+  p_full <- if (is.matrix(p)) as.vector(p) else rep(as.vector(p), each = B)
+  err <- abs(as.vector(pbar) - p_full)
+  if (identical(metric, "ARE")) {
+    err <- err / p_full
+  }
+  err[is.nan(err)] <- 0
+  err <- matrix(err, nrow = B)
+
+  if (B == 0L) {
+    return(numeric(0))
+  }
+  columns <- lapply(seq_len(ncol(err)), function(j) err[, j])
+  do.call(pmax, c(columns, na.rm = TRUE))
+}
+
+
+#' Compute the per-replicate pooled-proportion error statistic for one metric.
+#'
+#' Long-format wrapper around `pooled_error_stat()`, which is the single source of truth for the rule. Used by
+#' `replicate_success()` and by any caller that needs the raw per-replicate statistic, e.g. to evaluate many tau
+#' thresholds via `mean(stat <= tau)` without recomputation. Per (scenario, replicate, cell type), the estimated
+#' proportions are averaged over persons, giving the pooled estimate `pbar_j`; the population-level true proportion
+#' `p_j` is averaged the same way. These form one row of `pbar` and `p` per (scenario, replicate), and
+#' `pooled_error_stat()` turns each row into the max cell-type error. A cell type absent from a (scenario, replicate)
+#' is left out of that replicate's max. With a single person per replicate this reduces to the per-draw error
+#' against `p`.
+#'
+#' The grouping is vectorised: integer group keys and `rowsum()` for the per-cell-type means. There is no
+#' `stats::aggregate()` call, no `tapply()`, and no per-row loop.
 #'
 #' @param person_results Data.frame with at least the columns `replicate`, `cell_type`, `metric`,
 #'   `observed_proportion` and `population_mean_proportion`, one row per (replicate, person, cell type, metric). A
@@ -268,33 +325,29 @@ replicate_pooled_error <- function(person_results, metric) {
   r_idx <- match(replicate_i, replicate_lv)
   c_idx <- match(cell_type_i, cell_type_lv)
 
-  # Stage 1: pooled estimate (mean over persons) and population proportion per (scenario, replicate, cell_type) via
-  # one integer group key and rowsum(); then the per-cell-type error of the pooled estimate.
+  # Pooled estimate (mean over persons) and population proportion per (scenario, replicate, cell_type) via one
+  # integer group key and rowsum(). rowsum() returns the groups in sorted key order.
   key1 <- (s_idx - 1L) * nR * nC + (r_idx - 1L) * nC + c_idx
+  key1_lv     <- sort(unique(key1))
   counts1     <- rowsum(rep(1L, length(observed_i)), key1)[, 1L]
   pooled1     <- rowsum(observed_i, key1)[, 1L] / counts1
   population1 <- rowsum(population_i, key1)[, 1L] / counts1
-  error1 <- abs(pooled1 - population1)
-  if (identical(metric, "ARE")) {
-    error1 <- error1 / population1
-  }
-  error1[is.nan(error1)] <- 0
-  key1_sorted <- as.numeric(names(counts1))
 
-  tmp1 <- (key1_sorted - 1L) %/% nC
-  r1 <- (tmp1 %% nR) + 1L
-  s1 <- (tmp1 %/% nR) + 1L
+  # Lay the groups out as (scenario, replicate) rows x cell-type columns. A cell type missing from a
+  # (scenario, replicate) stays NA in both matrices, so pooled_error_stat() leaves it out of that row's max.
+  c1   <- ((key1_lv - 1L) %% nC) + 1L
+  key2 <- ((key1_lv - 1L) %/% nC) + 1L
+  key2_lv <- unique(key2)
+  row1 <- match(key2, key2_lv)
+  pbar <- matrix(NA_real_, nrow = length(key2_lv), ncol = nC)
+  p    <- pbar
+  pbar[cbind(row1, c1)] <- pooled1
+  p[cbind(row1, c1)]    <- population1
 
-  # Stage 2: max over cell types per (scenario, replicate). Sort by group then by value descending and keep the
-  # first row of each group -- fully vectorised, no tapply()/aggregate() and no per-row loop.
-  key2 <- (s1 - 1L) * nR + r1
-  ord  <- order(key2, -error1)
-  keep <- !duplicated(key2[ord])
-  max_key2 <- key2[ord][keep]
-  stat     <- error1[ord][keep]
+  stat <- pooled_error_stat(pbar, p, metric)
 
-  r2 <- ((max_key2 - 1L) %% nR) + 1L
-  s2 <- ((max_key2 - 1L) %/% nR) + 1L
+  r2 <- ((key2_lv - 1L) %% nR) + 1L
+  s2 <- ((key2_lv - 1L) %/% nR) + 1L
 
   out <- data.frame(
     scenario_id = scenario_lv[s2],
@@ -312,8 +365,10 @@ replicate_pooled_error <- function(person_results, metric) {
 
 #' Determine per-replicate success against a set of metric thresholds.
 #'
-#' Replicate success rule shared by `extract_success_rate()` and `simulate_success_at_n()` (both models). For each
-#' metric, the per-replicate statistic comes from `replicate_pooled_error()`, the single source of truth for the rule:
+#' Long-format replicate success rule, used by `extract_success_rate()` and by `simulate_success_at_n()` for the
+#' multinomial model (`pass_from_max_errors()` is the matrix counterpart, used for the Dirichlet-multinomial
+#' model). For each metric, the per-replicate statistic comes from `replicate_pooled_error()`, which applies `pooled_error_stat()`, the
+#' single source of truth for the rule:
 #' the estimated proportions are averaged over persons per cell type, compared with the population-level true
 #' proportion, and the largest cell-type error is taken. A replicate passes that metric if this value is `<= tau`,
 #' and passes overall if it passes every metric in `taus`. This function only turns each metric's `stat` into a
@@ -366,6 +421,53 @@ replicate_success <- function(person_results, taus) {
   replicate_pass <- replicate_pass[order(replicate_pass$scenario_id, replicate_pass$replicate), , drop = FALSE]
   rownames(replicate_pass) <- NULL
   replicate_pass[, c("scenario_id", "replicate", pass_cols, "pass")]
+}
+
+
+#' Determine per-replicate success from a matrix of pooled error statistics.
+#'
+#' Matrix counterpart of `replicate_success()`, for callers that already hold the per-replicate statistics, e.g. the
+#' `max_errors` returned by `run_replicates()` for the Dirichlet-multinomial model (each column computed by
+#' `pooled_error_stat()`). A replicate passes iff, for every metric in both `names(taus)` and
+#' `colnames(max_errors)`, `max_errors[, m] <= taus[[m]]`.
+#'
+#' Same semantics as `replicate_success()`: metrics in `taus` that are not columns of `max_errors` are skipped with a
+#' warning, and an error is raised if none remain; columns of `max_errors` without a tau are ignored silently.
+#' `NaN` statistics never occur when the columns come from `pooled_error_stat()` (it maps them to 0); an `Inf`
+#' statistic fails any finite tau; an `NA` statistic gives an `NA` pass, as in `replicate_success()`.
+#'
+#' @param max_errors Numeric matrix, B x M, with one column per metric (column names are metric names).
+#' @param taus       Named list with one scalar threshold per metric (e.g. `list(AE = 0.02, ARE = 0.5)`).
+#'
+#' @return Logical vector of length B, in row order of `max_errors`.
+pass_from_max_errors <- function(max_errors, taus) {
+  if (!is.matrix(max_errors) || !is.numeric(max_errors) || is.null(colnames(max_errors))) {
+    stop("max_errors must be a numeric matrix with one named column per metric.", call. = FALSE)
+  }
+  if (!is.list(taus) || is.null(names(taus)) || any(names(taus) == "")) {
+    stop("taus must be a named list with one scalar threshold per metric.", call. = FALSE)
+  }
+  for (m in names(taus)) {
+    if (!is.numeric(taus[[m]]) || length(taus[[m]]) != 1L || is.na(taus[[m]])) {
+      stop(sprintf("taus$%s must be a single numeric threshold.", m), call. = FALSE)
+    }
+  }
+
+  metrics <- names(taus)
+  missing_metrics <- setdiff(metrics, colnames(max_errors))
+  for (m in missing_metrics) {
+    warning(sprintf("pass_from_max_errors: metric '%s' is not in max_errors; it is skipped.", m), call. = FALSE)
+  }
+  metrics <- setdiff(metrics, missing_metrics)
+  if (length(metrics) == 0L) {
+    stop("None of the metrics in taus are present in max_errors.", call. = FALSE)
+  }
+
+  pass <- rep(TRUE, nrow(max_errors))
+  for (m in metrics) {
+    pass <- pass & (max_errors[, m] <= taus[[m]])
+  }
+  unname(pass)
 }
 
 
