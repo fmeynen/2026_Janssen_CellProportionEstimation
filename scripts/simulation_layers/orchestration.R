@@ -186,7 +186,8 @@ run_sample_size_experiment <- function(
 #' Validates `p_max` (for `proportion_method = "fixed_max_beta"`), builds the alpha x p_max grid (alpha varies
 #' fastest) and calls `generate_proportions()` once per row. `generate_proportions()` is RNG-free, so calling it
 #' up front does not change any random draws made later by the simulation. When several `p_max` values are given,
-#' impossible fixed-max combinations are skipped (`generate_props_fixed_max_beta()` warns once per combination);
+#' fixed-max combinations with `K * p_max < 1` are skipped (`generate_props_fixed_max_beta()` warns once per
+#' combination);
 #' otherwise the error is propagated. Stops if no combination is feasible.
 #'
 #' @return A list with `grid` (data.frame with `alpha`, `p_max` (NA unless fixed-max), `population_id`),
