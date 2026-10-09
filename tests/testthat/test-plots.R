@@ -164,3 +164,51 @@ test_that("plot_success_vs_n draws a dotted 0.95 target by default and hides it 
   expect_dotted_target(plot_success_vs_n(curves_n_df(), "AE"), 0.95)
   expect_length(hline_layers(plot_success_vs_n(curves_n_df(), "AE", target = NULL)), 0L)
 })
+
+
+sample_size_df <- function() {
+  data.frame(
+    alpha = rep(c(1, 5), each = 6),
+    n_people = rep(rep(c(10, 20, 40), 2), 4),
+    metric = rep(c("AE", "ARE"), each = 3, times = 2),
+    sample_size = c(
+      100L, 60L, 40L, 300L, 200L, 150L,
+      NA, 500L, 400L, 800L, NA, 700L
+    ),
+    stopping_reason = c(
+      "tolerance", "tolerance", "max_iterations", "tolerance", "tolerance", "tolerance",
+      "infeasible", "tolerance", "tolerance", "n_max", "infeasible", "tolerance"
+    ),
+    stringsAsFactors = FALSE
+  )
+}
+
+test_that("plot_sample_size_by_people builds a log10, alpha-faceted ggplot without warnings", {
+  p <- plot_sample_size_by_people(sample_size_df(), "AE", subtitle = "sub")
+  expect_s3_class(p, "ggplot")
+  expect_no_warning(b <- ggplot2::ggplot_build(p))
+  expect_s3_class(p$facet, "FacetWrap")
+  y_scale <- p$scales$get_scales("y")
+  trans <- if (!is.null(y_scale$trans)) y_scale$trans else y_scale$transformation
+  expect_equal(trans$name, "log-10")
+  expect_equal(p$labels$subtitle, "sub")
+  expect_equal(length(unique(b$layout$layout$PANEL)), 2L)
+})
+
+test_that("plot_sample_size_by_people works when a metric has no feasible values", {
+  d <- sample_size_df()
+  d <- d[d$metric == "ARE", ]
+  d$sample_size <- NA_integer_
+  d$stopping_reason <- "infeasible"
+  p <- plot_sample_size_by_people(d, "ARE")
+  expect_s3_class(p, "ggplot")
+  expect_no_warning(ggplot2::ggplot_build(p))
+})
+
+test_that("plot_sample_size_by_people validates its inputs", {
+  d <- sample_size_df()
+  expect_error(plot_sample_size_by_people(list(), "AE"), "data.frame")
+  expect_error(plot_sample_size_by_people(d[, c("alpha", "metric")], "AE"), "missing required columns")
+  expect_error(plot_sample_size_by_people(d, c("AE", "ARE")), "single character")
+  expect_error(plot_sample_size_by_people(d, "nope"), "No rows")
+})

@@ -450,3 +450,80 @@ plot_success_vs_n <- function(curves_n, metric, subtitle = NULL, target = 0.95) 
 
   p
 }
+
+
+#' Plot the cells per person needed to reach the target, by number of people.
+#'
+#' One panel per alpha; x is `n_people`, y is the cells per person found by the
+#' sample-size solver (log10 scale, shared across panels). Converged results are
+#' drawn as filled points joined by a line; feasible but not converged results
+#' as open points; combinations whose target is unreachable as an x pinned to
+#' a common height at the top of the panels.
+#'
+#' @param df  data.frame with columns `alpha`, `n_people`, `metric`,
+#'   `sample_size` (`NA` when infeasible) and `stopping_reason` (`"tolerance"`
+#'   = converged, `"infeasible"` = target unreachable, anything else = feasible
+#'   but not converged).
+#' @param metric    Character scalar; the metric to plot (e.g. `"AE"` or
+#'   `"ARE"`).
+#' @param subtitle  Optional character scalar; passed through to `labs()`.
+#'
+#' @return A ggplot object.
+plot_sample_size_by_people <- function(df, metric, subtitle = NULL) {
+  if (!is.data.frame(df)) {
+    stop("df must be a data.frame.", call. = FALSE)
+  }
+  required_cols <- c("alpha", "n_people", "metric", "sample_size", "stopping_reason")
+  missing_cols <- setdiff(required_cols, names(df))
+  if (length(missing_cols) > 0L) {
+    stop(
+      sprintf("df is missing required columns: %s", paste(missing_cols, collapse = ", ")),
+      call. = FALSE
+    )
+  }
+  if (!is.character(metric) || length(metric) != 1L || is.na(metric)) {
+    stop("metric must be a single character string.", call. = FALSE)
+  }
+
+  d <- df[df$metric == metric, , drop = FALSE]
+  if (nrow(d) == 0L) {
+    stop(sprintf("No rows in df match metric '%s'.", metric), call. = FALSE)
+  }
+
+  status_levels <- c("converged", "not converged", "target unreachable")
+  d$status <- ifelse(
+    d$stopping_reason == "tolerance", status_levels[1L],
+    ifelse(d$stopping_reason == "infeasible", status_levels[3L], status_levels[2L])
+  )
+  d$status <- factor(d$status, levels = status_levels)
+  # Unreachable rows are pinned to the top of every panel: a shared height just
+  # above the largest feasible value (y = Inf would draw half the marker
+  # outside the panel).
+  finite_sizes <- d$sample_size[is.finite(d$sample_size)]
+  top <- if (length(finite_sizes) > 0L) max(finite_sizes) * 1.5 else 10
+  d$y <- ifelse(d$status == status_levels[3L], top, d$sample_size)
+
+  y_scale <- ggplot2::scale_y_log10(expand = ggplot2::expansion(mult = 0.08))
+
+  ggplot2::ggplot(d, ggplot2::aes(x = n_people, y = y)) +
+    ggplot2::geom_line(
+      data = d[d$status == status_levels[1L], , drop = FALSE],
+      ggplot2::aes(group = 1)
+    ) +
+    ggplot2::geom_point(ggplot2::aes(shape = status), size = 2.5) +
+    ggplot2::facet_wrap(~alpha, labeller = ggplot2::label_both) +
+    ggplot2::scale_x_continuous(breaks = sort(unique(d$n_people))) +
+    y_scale +
+    ggplot2::scale_shape_manual(
+      values = c("converged" = 16, "not converged" = 1, "target unreachable" = 4),
+      drop = FALSE
+    ) +
+    ggplot2::labs(
+      x        = "Number of people (n_people)",
+      y        = "Cells per person needed (log scale)",
+      shape    = NULL,
+      title    = sprintf("%s: cells per person needed to reach the target", metric),
+      subtitle = subtitle
+    ) +
+    ggplot2::theme_bw()
+}
