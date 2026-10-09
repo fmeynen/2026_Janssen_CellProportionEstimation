@@ -1,5 +1,5 @@
 # Tests for simulate_success_at_n() -----------------------------------------------------------------------------
-# Both models must route through the shared replicate_success() success rule (extraction.R); the old
+# Both models must route through the shared replicate_success() success rule (calculation.R); the old
 # required_person_fraction / per-person rule has been removed entirely.
 
 multinomial_config <- list(

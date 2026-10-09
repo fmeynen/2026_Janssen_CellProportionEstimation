@@ -554,7 +554,7 @@ run_dm_errorchoice_experiment <- function(
 #'     \item{curves}{Tidy data.frame:
 #'       alpha, p_max, metric, tau, success_rate, mean_n_above.}
 #'     \item{argmax_summary}{Tidy data.frame:
-#'       alpha, p_max, metric, cell_type, count, fraction, p_value.}
+#'       alpha, p_max, metric, cell_type, count, fraction, true_proportion.}
 #'   }
 run_simulation_experiment <- function(
   alpha,
@@ -672,7 +672,7 @@ run_simulation_experiment <- function(
       "cell_type",
       "count",
       "fraction",
-      "p_value"
+      "true_proportion"
     )]
   }
 

@@ -117,17 +117,28 @@ P1 pass done on branch `fix/p1-broken-code` (2026-10-01); all P1 items resolved,
 
 ## P4: Clarity
 
-- [ ] **Put functions in the right layer files:**
+- [x] **Put functions in the right layer files:**
   - `compute_errors` is in `simulation.R`, but the header of `calculation.R` says it holds the error metrics.
   - The success rule (`replicate_pooled_error`, `replicate_success`, `success_rule_id`) is in `extraction.R`.
-- [ ] **Remove the stale note** at [calculation.R:3-5](scripts/simulation_layers/calculation.R#L3-L5) (the solver
+  Resolved: `compute_errors` and the success rule moved to `calculation.R`; `extract_success_rate` stays in
+  `extraction.R`. Also fixed `success_rule_id`'s doc reference to `run_dm_errorchoice_experiment()`.
+- [x] **Remove the stale note** at [calculation.R:3-5](scripts/simulation_layers/calculation.R#L3-L5) (the solver
   replacement is done).
-- [ ] **Move the misplaced doc block.** The block at
+  Resolved: note removed; the `calculation.R` header now lists error metrics, success rates, the success rule and the
+  sample-size solver.
+- [x] **Move the misplaced doc block.** The block at
   [simulation.R:487-518](scripts/simulation_layers/simulation.R#L487-L518) describes the multinomial output of
   `run_replicates` but sits on `run_replicates_dirichlet_multinomial`. Split it, and document `run_replicates` itself.
-- [ ] **Rename `p_value`** in `summarize_argmax` ([extraction.R:49](scripts/simulation_layers/extraction.R#L49)). It
+  Resolved: `run_replicates` has the full doc block (both models' returns); `run_replicates_dirichlet_multinomial`
+  has its own.
+- [x] **Rename `p_value`** in `summarize_argmax` ([extraction.R:49](scripts/simulation_layers/extraction.R#L49)). It
   holds the true proportion, not a p-value; e.g. `p_true`.
-- [ ] **Fix `generate_proportions()`**: it accepts `grid` but doesn't pass it on for `fixed_max_beta`, where the default
+  Resolved: renamed to `true_proportion` (also in `run_simulation_experiment`'s `argmax_summary`). No cache-schema
+  bump; there were no errorchoice cache files to delete.
+- [x] **Fix `generate_proportions()`**: it accepts `grid` but doesn't pass it on for `fixed_max_beta`, where the default
   length would be wrong anyway.
-- [ ] **Remove the placeholder option** `"logistic_normal_multinomial"` from `simulate_counts()`'s `match.arg` choices
+  Resolved: `grid` defaults to `NULL` (each generator's own default) and is forwarded to all three methods, with tests.
+- [x] **Remove the placeholder option** `"logistic_normal_multinomial"` from `simulate_counts()`'s `match.arg` choices
   (it only stops with "not implemented"); a comment is enough.
+  Resolved: option and its test removed; the commented-out stub stays, and the `simulation_errorchoice.R` comment
+  now calls it a future idea.

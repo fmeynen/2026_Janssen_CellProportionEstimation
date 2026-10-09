@@ -163,7 +163,9 @@ generate_props_fixed_min_beta <- function(alpha, K = 10, p_min,
 #'                 vector when calling the fixed-max generator directly.
 #' @param p_min   Fixed smallest true proportion for `"fixed_min_beta"`. The smallest value is always placed at the
 #'                lowest index (ties allowed); impossible combinations warn and fail. May be a numeric vector.
-#' @param grid    Evaluation points in (0,1), length K (used by `"beta"`).
+#' @param grid    Optional evaluation points in (0,1). `NULL` (default) uses each method's own default grid. When
+#'                supplied, it must have length K for `"beta"` and length K - 1 for `"fixed_max_beta"` /
+#'                `"fixed_min_beta"`.
 #'
 #' @return Numeric vector of length K, all strictly positive, summing to 1.
 #'   For methods `"fixed_max_beta"` / `"fixed_min_beta"` with vector `p_max` / `p_min`, returns a numeric matrix with
@@ -172,19 +174,22 @@ generate_proportions <- function(alpha, K = 10,
                                  method = c("beta", "fixed_max_beta", "fixed_min_beta"),
                                  p_max = NULL,
                                  p_min = NULL,
-                                 grid = default_beta_grid(K)) {
+                                 grid = NULL) {
   method <- match.arg(method)
+  # Forward grid only when supplied, so each generator otherwise uses its own default length.
+  grid_arg <- if (is.null(grid)) list() else list(grid = grid)
   switch(method,
-    beta = generate_proportions_beta(alpha = alpha, K = K, grid = grid),
-    fixed_max_beta = generate_props_fixed_max_beta(
-      alpha = alpha,
-      K = K,
-      p_max = p_max
+    beta = do.call(
+      generate_proportions_beta,
+      c(list(alpha = alpha, K = K), grid_arg)
     ),
-    fixed_min_beta = generate_props_fixed_min_beta(
-      alpha = alpha,
-      K = K,
-      p_min = p_min
+    fixed_max_beta = do.call(
+      generate_props_fixed_max_beta,
+      c(list(alpha = alpha, K = K, p_max = p_max), grid_arg)
+    ),
+    fixed_min_beta = do.call(
+      generate_props_fixed_min_beta,
+      c(list(alpha = alpha, K = K, p_min = p_min), grid_arg)
     )
   )
 }
@@ -286,8 +291,7 @@ simulate_counts_dirichlet_multinomial <- function(p, n_people, n_per_person, con
 #'   proportion matrices.
 simulate_counts <- function(p, n = NULL,
                             model = c("multinomial",
-                                      "dirichlet_multinomial",
-                                      "logistic_normal_multinomial"),
+                                      "dirichlet_multinomial"),
                             n_people = NULL,
                             n_per_person = NULL,
                             concentration = NULL,
@@ -305,10 +309,6 @@ simulate_counts <- function(p, n = NULL,
       n_people = n_people,
       n_per_person = n_per_person,
       concentration = concentration
-    ),
-    logistic_normal_multinomial = stop(
-      "model = 'logistic_normal_multinomial' is not yet implemented.",
-      call. = FALSE
     )
   )
 }
@@ -330,46 +330,6 @@ counts_to_proportions <- function(y, n = sum(y)) {
     stop("n must be > 0.", call. = FALSE)
   }
   y / n
-}
-
-# Compute Errors --------------------------------------------------------------------------------------------------
-
-#' Compute per-cell-type error vectors for each requested metric.
-#'
-#' @param phat    Observed proportion vector (length K).
-#' @param p       True proportion vector (length K).
-#' @param metrics Character vector; any subset of `c("AE", "ARE", "TSE", "LAE")`.
-#' @param n       Total sample size; required only when `"TSE"` is in `metrics`.
-#'
-#' @return Named list with one numeric vector per metric (length K).
-#'
-#' @details
-#' AE  = abs(phat - p)
-#' ARE = abs(phat - p) / p  (no epsilon stabilisation; NaN/Inf for p == 0 is expected)
-#' TSE = asinh(sqrt(2 * n^2 * (phat - p)^2))  (requires n)
-#' LAE = log(abs(phat - p))
-compute_errors <- function(phat, p, metrics = c("AE", "ARE"), n = NULL) {
-  if (length(phat) != length(p)) {
-    stop("phat and p must have the same length.", call. = FALSE)
-  }
-  if ("TSE" %in% metrics && is.null(n)) {
-    stop("n must be provided when metric 'TSE' is requested.", call. = FALSE)
-  }
-  result <- list()
-  if ("AE" %in% metrics) {
-    result[["AE"]] <- abs(phat - p)
-  }
-  if ("ARE" %in% metrics) {
-    result[["ARE"]] <- abs(phat - p) / p   # ARE: NaN when p == 0 and phat == 0 (0/0);
-                                           # Inf when p == 0 and phat != 0; no stabilisation by design
-  }
-  if ("TSE" %in% metrics) {
-    result[["TSE"]] <- asinh(sqrt(2 * n^2 * (phat - p)^2))
-  }
-  if ("LAE" %in% metrics) {
-    result[["LAE"]] <- log(abs(phat - p))
-  }
-  result
 }
 
 # Replicate RNG helpers ---------------------------------------------------------------------------------------
@@ -544,37 +504,24 @@ replicate_apply <- function(streams, FUN) {
 # Coordinate Simulation --------------------------------------------------------------------------------------------
 
 
-#' Run B simulation replicates and store error results.
+#' Run B Dirichlet-multinomial replicates and store person-level error results.
 #'
-#' Efficiency strategy: simulate B times once, store only the per-replicate max error values and argmax indices.
-#' Threshold evaluation is done post-hoc by `evaluate_thresholds()` without re-simulating.
-#'
-#' @param p          True proportion vector (length K).
-#' @param n          Total sample size for the multinomial model.
-#' @param B          Number of replicates.
-#' @param metrics    Error metrics to compute; any subset of
-#'   `c("AE", "ARE", "TSE", "LAE")`.
-#' @param model      Sampling model passed to `simulate_counts()`.
-#' @param n_people   Number of people for the Dirichlet-multinomial model.
-#' @param n_per_person Number of cells sampled for each person in the
-#'   Dirichlet-multinomial model.
+#' @param p             Population mean proportion vector (length K).
+#' @param B             Number of replicates.
+#' @param metrics       Error metrics to compute; any subset of `c("AE", "ARE", "TSE", "LAE")`.
+#' @param n_people      Number of people per replicate.
+#' @param n_per_person  Number of cells sampled for each person.
 #' @param concentration Positive Dirichlet concentration parameter.
-#' @param scenario_id Optional scenario identifier included in person-level
-#'   Dirichlet-multinomial output.
-#' @param tie_method Tie-breaking rule passed to `max_error_summary()`.
-#' @param seed       Optional integer seed for reproducibility.
-#' @param ...        Additional arguments forwarded to `simulate_counts()`.
+#' @param scenario_id   Optional scenario identifier copied into every row of `person_results`.
+#' @param seed          Optional integer seed for reproducibility.
 #'
-#' @return For `"multinomial"`, the existing list with max-error matrices and
-#'   arrays. For `"dirichlet_multinomial"`, a list with `person_results`, a
-#'   tidy data.frame containing one row per replicate, person, cell type, and
-#'   metric, plus `inputs`.
+#' @return List with elements:
 #'   \describe{
-#'     \item{max_errors}{B x M numeric matrix of max error values.}
-#'     \item{argmax}{B x M integer matrix of argmax indices.}
-#'     \item{errors}{B x K x M numeric array of per-cell-type errors.}
-#'     \item{phat}{B x K numeric matrix of observed proportions.}
-#'     \item{inputs}{Copy of all input arguments (including seed used).}
+#'     \item{person_results}{Tidy data.frame with one row per replicate x person x cell type x metric, and columns
+#'       `scenario_id`, `n_people`, `concentration`, `replicate`, `person_id`, `cell_type`, `metric`, `count`,
+#'       `observed_proportion`, `person_true_proportion`, `population_mean_proportion` and `error` (the person's
+#'       error for that cell type and metric, measured against `person_true_proportion`).}
+#'     \item{inputs}{Copy of the input arguments (including seed used), with `model = "dirichlet_multinomial"`.}
 #'   }
 run_replicates_dirichlet_multinomial <- function(p, B, metrics,
                                                  n_people, n_per_person,
@@ -653,6 +600,38 @@ run_replicates_dirichlet_multinomial <- function(p, B, metrics,
   )
 }
 
+#' Run B simulation replicates and store error results.
+#'
+#' Public dispatcher: for `model = "dirichlet_multinomial"` it delegates to `run_replicates_dirichlet_multinomial()`;
+#' for `model = "multinomial"` it runs the replicates itself. Any other `model` is an error.
+#'
+#' Efficiency strategy (multinomial): simulate B times once, store only the per-replicate max error values and argmax
+#' indices (plus the per-cell-type errors and observed proportions). Threshold evaluation is done post-hoc by
+#' `evaluate_thresholds()` without re-simulating.
+#'
+#' @param p             True proportion vector (length K); for `"dirichlet_multinomial"`, the population mean.
+#' @param n             Total sample size per replicate; required for `"multinomial"`, ignored otherwise.
+#' @param B             Number of replicates.
+#' @param metrics       Error metrics to compute; any subset of `c("AE", "ARE", "TSE", "LAE")`.
+#' @param model         Sampling model: `"multinomial"` or `"dirichlet_multinomial"`.
+#' @param tie_method    Tie-breaking rule passed to `max_error_summary()`; `"multinomial"` only.
+#' @param seed          Optional integer seed for reproducibility; used by both models.
+#' @param n_people      Number of people per replicate; `"dirichlet_multinomial"` only.
+#' @param n_per_person  Number of cells sampled for each person; `"dirichlet_multinomial"` only.
+#' @param concentration Positive Dirichlet concentration parameter; `"dirichlet_multinomial"` only.
+#' @param scenario_id   Optional scenario identifier included in the person-level output; `"dirichlet_multinomial"`
+#'   only.
+#' @param ...           Additional arguments forwarded to `simulate_counts()`; `"multinomial"` only.
+#'
+#' @return For `"dirichlet_multinomial"`, the return value of `run_replicates_dirichlet_multinomial()`. For
+#'   `"multinomial"`, a list with elements (M = `length(metrics)`):
+#'   \describe{
+#'     \item{max_errors}{B x M numeric matrix of max error values (columns named by metric).}
+#'     \item{argmax}{B x M integer matrix of argmax cell-type indices (columns named by metric).}
+#'     \item{errors}{B x K x M numeric array of per-cell-type errors.}
+#'     \item{phat}{B x K numeric matrix of observed proportions.}
+#'     \item{inputs}{List of `p`, `n`, `B`, `metrics`, `model`, `tie_method` and `seed`.}
+#'   }
 run_replicates <- function(p, n = NULL, B,
                            metrics = c("AE", "ARE"),
                            model = "multinomial",

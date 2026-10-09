@@ -22,14 +22,6 @@ test_that("simulate_counts errors when n is missing for the multinomial model", 
   expect_error(simulate_counts(p, model = "multinomial"), "n must be provided")
 })
 
-test_that("simulate_counts errors for the unimplemented logistic_normal_multinomial model", {
-  p <- generate_proportions_beta(alpha = 2, K = 10)
-  expect_error(
-    simulate_counts(p, n = 200L, model = "logistic_normal_multinomial"),
-    "not yet implemented"
-  )
-})
-
 test_that("compute_errors returns AE and ARE for a known example", {
   p <- c(0.5, 0.3, 0.2)
   phat <- c(0.6, 0.25, 0.15)
