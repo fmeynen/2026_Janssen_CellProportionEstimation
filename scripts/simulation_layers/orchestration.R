@@ -79,33 +79,45 @@ cached_result <- function(key, name, compute, cache = TRUE, force_recompute = FA
 
 #' Run the sample-size solver over a grid of alphas with warm start and per-alpha caching.
 #'
-#' For each alpha in `config$alpha`, in the given order, runs `estimate_sample_size()` to find the smallest sample
-#' size reaching `config$success_rate_target`. Alphas are chained: the first alpha's solver starts from
-#' `config$n_init`, and every later alpha's solver starts from the previous alpha's `final_n` (warm start). Each
-#' alpha's result is cached in its own file under `cache_dir`, keyed by a config that includes that alpha's
-#' `n_init` — so changing an earlier alpha (and hence a later alpha's warm-start value) invalidates that later
-#' alpha's cache entry, while leaving unaffected entries untouched.
+#' For each alpha in `config$alpha`, in the given order, first checks that the target is reachable at all and then
+#' runs `estimate_sample_size()` to find the smallest sample size reaching `config$success_rate_target`.
 #'
-#' @param config          List with `alpha` (numeric vector, the grid) and `n_init` (the first alpha's starting
-#'   centre), plus every field required by `estimate_sample_size()` (`success_rate_target`, `rel_tol`,
-#'   `max_iterations`, `B`, `f0`, `f_floor`, `seed`) and by `simulate` (by default `simulate_success_at_n()`, which
-#'   also needs `K`, `taus`, `metrics`, `model`, `tie_method`, `proportion_method`, and — for
-#'   `model == "dirichlet_multinomial"` — `n_people` and `concentration`). `proportion_method` may be
+#' Feasibility check: `simulate` is called once per alpha at `n_max` (`config$n_max`, default 1e9, same seed as the
+#' solver), giving `x` successes out of `B`. The alpha is infeasible only if the one-sided 95% Clopper-Pearson upper
+#' bound `qbeta(0.95, x + 1, B - x)` (1 when `x == B`) is below `success_rate_target`. An infeasible alpha skips the
+#' solver, gets `sample_size = NA`, `stopping_reason = "infeasible"`, `iterations_used = 0` and no diagnostics rows,
+#' and triggers a warning (also when the result is read from the cache). A borderline alpha (point estimate below
+#' target, upper bound at or above it) runs the solver as usual.
+#'
+#' Alphas are chained: the first alpha's solver starts from the resolved `n_init`, and every later alpha's solver
+#' starts from the `final_n` of the last feasible alpha (warm start). Each alpha's result is cached in its own file
+#' under `cache_dir`, keyed by a config that includes that alpha's starting n — so changing an earlier alpha (and
+#' hence a later alpha's warm-start value) invalidates that later alpha's cache entry, while leaving unaffected
+#' entries untouched.
+#'
+#' @param config          List with `alpha` (numeric vector, the grid) plus every field required by
+#'   `estimate_sample_size()` (`success_rate_target`, `rel_tol`, `max_iterations`, `B`, `f0`, `f_floor`, `seed`) and by
+#'   `simulate` (by default `simulate_success_at_n()`, which also needs `K`, `taus`, `metrics`, `model`,
+#'   `tie_method`, `proportion_method`, and — for `model == "dirichlet_multinomial"` — `n_people` and
+#'   `concentration`). `n_init` (the first alpha's starting centre) is optional: when `NULL` it defaults to
+#'   `config$concentration` for the Dirichlet-multinomial model, and must be given for the multinomial model. An
+#'   explicit `n_init` wins; the resolved value is part of the cache key. `proportion_method` may be
 #'   `"fixed_min_beta"` (needs a single `config$p_min`) or `"fixed_max_beta"` (needs a single `config$p_max`); the
 #'   bounds are validated up front by `validate_proportion_bounds()` and both are part of the per-alpha cache key.
 #' @param cache           Logical; read/write per-alpha `.rds` cache files under `cache_dir`.
 #' @param force_recompute Logical; ignore any existing cache file and recompute (still writes the new result when
 #'   `cache` is `TRUE`).
 #' @param cache_dir       Directory holding the per-alpha cache files.
-#' @param simulate        Function `(alpha, n, config, seed)` forwarded to `estimate_sample_size()`. Defaults to
-#'   `simulate_success_at_n()`.
+#' @param simulate        Function `(alpha, n, config, seed)` forwarded to `estimate_sample_size()` and also called
+#'   once per alpha at `n_max` for the feasibility check. Defaults to `simulate_success_at_n()`.
 #'
 #' @return List with elements:
 #'   \describe{
 #'     \item{sample_size}{Data.frame with one row per alpha and columns `alpha`, `sample_size` (integer,
-#'       `final_n`), `stopping_reason`, `iterations_used`.}
-#'     \item{diagnostics}{Data.frame; `rbind()` of every alpha's `estimate_sample_size()` diagnostics, in grid
-#'       order.}
+#'       `final_n`; `NA` for infeasible alphas), `stopping_reason` (the solver's reason, or `"infeasible"`),
+#'       `iterations_used`, `success_ceiling` (success rate at `n_max`, filled for every alpha).}
+#'     \item{diagnostics}{Data.frame; `rbind()` of every solved alpha's `estimate_sample_size()` diagnostics, in grid
+#'       order (infeasible alphas contribute no rows).}
 #'   }
 run_sample_size_experiment <- function(
   config,
@@ -120,7 +132,22 @@ run_sample_size_experiment <- function(
     "config$alpha",
     allow_vector = TRUE
   )
-  n_init <- validate_positive_numeric(config$n_init, "config$n_init")
+  n_init <- config$n_init
+  if (is.null(n_init)) {
+    if (!identical(config$model, "dirichlet_multinomial")) {
+      stop(
+        "`config$n_init` must be given when `config$model` is not \"dirichlet_multinomial\" ",
+        "(there is no concentration to default to).",
+        call. = FALSE
+      )
+    }
+    n_init <- validate_positive_numeric(config$concentration, "config$concentration")
+  } else {
+    n_init <- validate_positive_numeric(n_init, "config$n_init")
+  }
+  n_max <- if (is.null(config$n_max)) 1e9 else config$n_max
+  validate_n_max(n_max, "`config$n_max`")
+  n_max <- as.integer(floor(n_max))
 
   n_alpha <- length(alphas)
   sample_size_rows <- vector("list", n_alpha)
@@ -153,28 +180,68 @@ run_sample_size_experiment <- function(
       p_max = config$p_max,
       n_people = config$n_people,
       concentration = config$concentration,
-      success_rule = success_rule_id()
+      success_rule = success_rule_id(),
+      feasibility_check = "clopper_pearson_0.95"
     )
     alpha_result <- cached_result(
       key = key,
       name = "sample_size",
       compute = function() {
-        estimate_sample_size(alpha_i, n_init, alpha_config, simulate = simulate)
+        ceiling_out <- simulate(alpha_i, n_max, alpha_config, config$seed)
+        x <- ceiling_out$success_count
+        upper <- if (x >= config$B) 1 else stats::qbeta(0.95, x + 1, config$B - x)
+        if (upper < config$success_rate_target) {
+          return(list(
+            final_n = NA_integer_,
+            stopping_reason = "infeasible",
+            iterations_used = 0L,
+            diagnostics = NULL,
+            success_ceiling = x / config$B,
+            ceiling_upper = upper
+          ))
+        }
+        result <- estimate_sample_size(alpha_i, n_init, alpha_config, simulate = simulate)
+        result$success_ceiling <- x / config$B
+        result$ceiling_upper <- upper
+        result
       },
       cache = cache,
       force_recompute = force_recompute,
       dir = cache_dir
     )
 
+    infeasible <- identical(alpha_result$stopping_reason, "infeasible")
+    if (infeasible) {
+      warning(
+        sprintf(
+          paste0(
+            "Alpha = %s is infeasible: the success rate at n_max = %d is %s (one-sided 95%% upper bound %s; ",
+            "concentration = %s, n_people = %s), so the target %s cannot be reached."
+          ),
+          format(alpha_i),
+          n_max,
+          format(alpha_result$success_ceiling),
+          format(alpha_result$ceiling_upper),
+          paste(format(config$concentration), collapse = ","),
+          paste(format(config$n_people), collapse = ","),
+          format(config$success_rate_target)
+        ),
+        call. = FALSE
+      )
+    }
+
     sample_size_rows[[i]] <- data.frame(
       alpha = alpha_i,
       sample_size = as.integer(alpha_result$final_n),
       stopping_reason = alpha_result$stopping_reason,
-      iterations_used = alpha_result$iterations_used,
+      iterations_used = as.integer(alpha_result$iterations_used),
+      success_ceiling = alpha_result$success_ceiling,
       stringsAsFactors = FALSE
     )
-    diag_list[[i]] <- alpha_result$diagnostics
-    n_init <- alpha_result$final_n
+    diag_list[i] <- list(alpha_result$diagnostics)
+    if (!infeasible) {
+      n_init <- alpha_result$final_n
+    }
   }
 
   list(
