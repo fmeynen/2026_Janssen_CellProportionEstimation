@@ -26,6 +26,7 @@ source(here::here("scripts", "simulations", "simulation_dm_errorchoice.R"))
 
 config <- simulation_dm_errorchoice_pmin_defaults()
 result <- suppressMessages(run_simulation_dm_errorchoice(config))
+samplesize <- suppressMessages(run_dm_errorchoice_samplesize(config))
 
 c_conc <- config$concentration
 K <- config$K
@@ -217,3 +218,29 @@ ae_end_max <- sapply(config$alpha, function(a) success_n(result$curves_n, "AE", 
 For AE, the success rate increases with the number of cells per person and with the number of people. At $\alpha = `r alpha_max`$ with a single person, it rises from `r pct(success_n(result$curves_n, "AE", alpha_max, 1, min(n_grid)), 0)` at `r sci(min(n_grid))` cells to `r pct(success_n(result$curves_n, "AE", alpha_max, 1, 1e4), 0)` at `r sci(1e4)` cells, and ends at `r pct(success_n(result$curves_n, "AE", alpha_max, 1, max(n_grid)), 0)` at `r sci(max(n_grid))` cells. With `r N_max` people the same curve reaches `r pct(success_n(result$curves_n, "AE", alpha_max, N_max, 1e4), 0)` at `r sci(1e4)` cells and ends at `r pct(success_n(result$curves_n, "AE", alpha_max, N_max, max(n_grid)), 0)`. The curves flatten, and above roughly `r sci(1e6)` cells per person extra cells hardly help. The plateau depends mainly on the number of people: with a single person it lies between `r pct(min(ae_end_1), 0)` and `r pct(max(ae_end_1), 0)` across $\alpha$, and with `r N_max` people it is at least `r pct(min(ae_end_max), 1)`.
 
 For ARE the picture is more uniform. From `r sci(1e4)` cells per person on, the success rate is at least `r pct(success_range("ARE", 1e4)[1], 1)` for every $\alpha$ and every number of people, so the `r pct(config$target, 0)` target is reached everywhere. The differences are at small $n$. At `r sci(min(n_grid))` cells with a single person, success is `r pct(success_n(result$curves_n, "ARE", alpha_min, 1, min(n_grid)), 0)` at $\alpha = `r alpha_min`$ and falls to `r pct(success_n(result$curves_n, "ARE", alpha_max, 1, min(n_grid)), 0)` at $\alpha = `r alpha_max`$. With `r N_max` people the values are `r pct(success_n(result$curves_n, "ARE", alpha_min, N_max, min(n_grid)), 0)` and `r pct(success_n(result$curves_n, "ARE", alpha_max, N_max, min(n_grid)), 0)`. For comparison, without a bound the smallest proportion in the original simulation falls to about $3 \cdot 10^{-6}$ at $\alpha = 5$; here it is never below $`r p_min`$.
+
+## Required cells per person {#sec-samplesize}
+
+@fig-samplesize-ae and @fig-samplesize-are show, for each $\alpha$ and number of people $N$, the smallest number of cells per person for which the success rate reaches the `r 100 * config$target`% target at the fixed thresholds, found with an iterative sample-size solver. Before solving, it is checked whether the target can be reached at all with very many cells per person; combinations where it cannot are marked with × at the top of the panel.
+
+```{r}
+#| label: fig-samplesize-ae
+#| fig-cap: !expr 'sprintf("Cells per person needed to reach the %s%% AE success target at $\tau_{AE} = %s$ (log scale), versus the number of people $N$. One panel per $\alpha$. An open marker means the solver did not converge; × at the top means the target cannot be reached.", 100 * config$target, tau_AE)'
+#| fig-alt: "Four panels, one per alpha, showing the number of cells per person needed to reach the AE success target on a log scale versus the number of people. The required number typically decreases as people are added. Combinations where the target cannot be reached are marked with a cross at the top of the panel."
+
+plot_sample_size_by_people(
+  samplesize, "AE",
+  subtitle = sprintf("tau_AE = %s, p_min = %s", tau_AE, p_min)
+)
+```
+
+```{r}
+#| label: fig-samplesize-are
+#| fig-cap: !expr 'sprintf("Cells per person needed to reach the %s%% ARE success target at $\tau_{ARE} = %s$ (log scale), versus the number of people $N$. One panel per $\alpha$. An open marker means the solver did not converge; × at the top means the target cannot be reached.", 100 * config$target, tau_ARE)'
+#| fig-alt: "Four panels, one per alpha, showing the number of cells per person needed to reach the ARE success target on a log scale versus the number of people. The required number typically decreases as people are added. Combinations where the target cannot be reached are marked with a cross at the top of the panel."
+
+plot_sample_size_by_people(
+  samplesize, "ARE",
+  subtitle = sprintf("tau_ARE = %s, p_min = %s", tau_ARE, p_min)
+)
+```

@@ -26,6 +26,7 @@ source(here::here("scripts", "simulations", "simulation_dm_errorchoice.R"))
 
 config <- simulation_dm_errorchoice_defaults()
 result <- suppressMessages(run_simulation_dm_errorchoice(config))
+samplesize <- suppressMessages(run_dm_errorchoice_samplesize(config))
 
 c_conc <- config$concentration
 K <- config$K
@@ -246,6 +247,32 @@ plot_success_vs_n(
 For AE, the success rate increases with the number of cells per person, but only up to a point. At $\alpha = `r alpha_max`$ with a single person, it rises from `r pct(success_n(result$curves_n, "AE", alpha_max, 1, min(n_grid)), 0)` at `r sci(min(n_grid))` cells to `r pct(success_n(result$curves_n, "AE", alpha_max, 1, n_c), 0)` at $n \approx c$, and ends at `r pct(success_n(result$curves_n, "AE", alpha_max, 1, max(n_grid)), 0)` at `r sci(max(n_grid))` cells. With `r N_max` people the same curve ends at `r pct(success_n(result$curves_n, "AE", alpha_max, N_max, max(n_grid)), 0)`. Beyond roughly `r sci(10 * c_conc)` cells per person, extra cells hardly help, and only more people raise the plateau (@sec-why-level).
 
 For ARE the picture depends on $\alpha$. At $\alpha = `r min(config$alpha)`$ with a single person, success rises from `r pct(success_n(result$curves_n, "ARE", min(config$alpha), 1, min(n_grid)), 0)` to `r pct(success_n(result$curves_n, "ARE", min(config$alpha), 1, max(n_grid)), 0)`. At $\alpha = `r alpha_max`$ it ends at only `r pct(success_n(result$curves_n, "ARE", alpha_max, 1, max(n_grid)), 0)` (1 person) and `r pct(success_n(result$curves_n, "ARE", alpha_max, N_max, max(n_grid)), 0)` (`r N_max` people). The rarest cell types have $c\,p_j \ll 1$, so in most replicates none of the people carry them. Then $\bar p_j = 0$ and $ARE_j = 1 > \tau_{ARE}$, however many cells are counted. At small $n$ the same happens through counting: a rare type that people do carry is often simply not observed. The irregular, non-monotone parts of the curves for $\alpha = 3$ and $4$ (around $10^3$ to $10^4$ cells) come from this discreteness. When the expected count of a rare type per person is of order one, $\hat p_{ij}$ can only take a few values, and whether $ARE_j \le \tau_{ARE}$ jumps with $n$.
+
+## Required cells per person {#sec-samplesize}
+
+@fig-samplesize-ae and @fig-samplesize-are show, for each $\alpha$ and number of people $N$, the smallest number of cells per person for which the success rate reaches the `r 100 * config$target`% target at the fixed thresholds, found with an iterative sample-size solver. Before solving, it is checked whether the target can be reached at all with very many cells per person; combinations where it cannot are marked with × at the top of the panel.
+
+```{r}
+#| label: fig-samplesize-ae
+#| fig-cap: !expr 'sprintf("Cells per person needed to reach the %s%% AE success target at $\\tau_{AE} = %s$ (log scale), versus the number of people $N$. One panel per $\\alpha$. An open marker means the solver did not converge; × at the top means the target cannot be reached.", 100 * config$target, tau_AE)'
+#| fig-alt: "Four panels, one per alpha, showing the number of cells per person needed to reach the AE success target on a log scale versus the number of people. The required number typically decreases as people are added. Combinations where the target cannot be reached are marked with a cross at the top of the panel."
+
+plot_sample_size_by_people(
+  samplesize, "AE",
+  subtitle = sprintf("tau_AE = %s, concentration = %s", tau_AE, c_conc)
+)
+```
+
+```{r}
+#| label: fig-samplesize-are
+#| fig-cap: !expr 'sprintf("Cells per person needed to reach the %s%% ARE success target at $\\tau_{ARE} = %s$ (log scale), versus the number of people $N$. One panel per $\\alpha$. An open marker means the solver did not converge; × at the top means the target cannot be reached.", 100 * config$target, tau_ARE)'
+#| fig-alt: "Four panels, one per alpha, showing the number of cells per person needed to reach the ARE success target on a log scale versus the number of people. The required number typically decreases as people are added. Combinations where the target cannot be reached are marked with a cross at the top of the panel."
+
+plot_sample_size_by_people(
+  samplesize, "ARE",
+  subtitle = sprintf("tau_ARE = %s, concentration = %s", tau_ARE, c_conc)
+)
+```
 
 # Why the curves level off {#sec-why-level}
 
