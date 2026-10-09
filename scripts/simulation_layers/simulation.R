@@ -87,7 +87,7 @@ generate_props_fixed_max_beta <- function(alpha, K = 10, p_max,
   if (!is.numeric(K) || length(K) != 1L || !is.finite(K) || K %% 1 != 0 || K < 2L) {
     stop("K must be a single integer >= 2 for method = 'fixed_max_beta'.", call. = FALSE)
   }
-  validate_p_max(p_max, method_arg = "method")
+  validate_p_bound(p_max, "p_max", method_arg = "method")
   if (length(grid) != K) {
     stop("grid must have length K for method = 'fixed_max_beta'.", call. = FALSE)
   }
@@ -139,12 +139,7 @@ generate_props_fixed_min_beta <- function(alpha, K = 10, p_min,
   if (!is.numeric(K) || length(K) != 1L || !is.finite(K) || K %% 1 != 0 || K < 2L) {
     stop("K must be a single integer >= 2 for method = 'fixed_min_beta'.", call. = FALSE)
   }
-  if (is.null(p_min)) {
-    stop("p_min must be provided when method = 'fixed_min_beta'.", call. = FALSE)
-  }
-  if (!is.numeric(p_min) || any(!is.finite(p_min)) || any(p_min <= 0) || any(p_min >= 1)) {
-    stop("p_min must contain number(s) strictly between 0 and 1.", call. = FALSE)
-  }
+  validate_p_bound(p_min, "p_min", method_arg = "method")
   if (length(grid) != K) {
     stop("grid must have length K for method = 'fixed_min_beta'.", call. = FALSE)
   }
@@ -182,6 +177,8 @@ generate_props_fixed_min_beta <- function(alpha, K = 10, p_min,
 #' @param p_min   Fixed smallest true proportion for `"fixed_min_beta"`. The smallest value of the Beta curve is set to
 #'                `p_min` and the rest rescaled (values that would fall below it are clipped to it); impossible
 #'                combinations (`K * p_min > 1`) warn and fail. May be a numeric vector.
+#'                A bound that the chosen method does not use (`p_min` with `"beta"` / `"fixed_max_beta"`, `p_max`
+#'                with `"beta"` / `"fixed_min_beta"`) is an error; leave it `NULL`.
 #' @param grid    Optional evaluation points in (0,1) of length K, for every method. `NULL` (default) uses
 #'                `default_beta_grid(K)`.
 #'
@@ -194,6 +191,12 @@ generate_proportions <- function(alpha, K = 10,
                                  p_min = NULL,
                                  grid = NULL) {
   method <- match.arg(method)
+  if (!is.null(p_min) && !identical(method, "fixed_min_beta")) {
+    stop(sprintf("p_min is not used by method = '%s'; leave it NULL.", method), call. = FALSE)
+  }
+  if (!is.null(p_max) && !identical(method, "fixed_max_beta")) {
+    stop(sprintf("p_max is not used by method = '%s'; leave it NULL.", method), call. = FALSE)
+  }
   # Forward grid only when supplied, so each generator otherwise uses its own default length.
   grid_arg <- if (is.null(grid)) list() else list(grid = grid)
   switch(method,
@@ -804,6 +807,9 @@ run_replicates <- function(p, n = NULL, B,
 #'     \item{tie_method}{Tie-breaking rule for max-error argmax (multinomial only; unused by the success rule, but
 #'       still forwarded to `run_replicates()`).}
 #'     \item{proportion_method}{Proportion-generation method.}
+#'     \item{p_min, p_max}{Single bound required by `"fixed_min_beta"` / `"fixed_max_beta"` respectively; `NULL`
+#'       otherwise (a bound the method does not use is an error). Validated by `validate_proportion_bounds()` before
+#'       any simulation.}
 #'   }
 #' @param seed   Optional integer RNG seed forwarded to `run_replicates()`; defaults to `config$seed`. Because
 #'   `run_replicates()` derives per-replicate RNG streams from `seed` alone (see `replicate_streams()`), calling
@@ -818,11 +824,13 @@ run_replicates <- function(p, n = NULL, B,
 #'     \item{rep_out}{Raw output of `run_replicates()`.}
 #'   }
 simulate_success_at_n <- function(alpha, n = NULL, config, seed = config$seed) {
+  validate_proportion_bounds(config$proportion_method, config$K, config$p_min, config$p_max)
   p <- generate_proportions(
     alpha  = alpha,
     K      = config$K,
     method = config$proportion_method,
-    p_max  = config$p_max
+    p_max  = config$p_max,
+    p_min  = config$p_min
   )
 
   missing_tau_msg <- paste0(

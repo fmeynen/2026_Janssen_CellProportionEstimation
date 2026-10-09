@@ -271,3 +271,45 @@ test_that("pass_from_max_errors() validates its inputs", {
   expect_error(pass_from_max_errors(max_errors, c(AE = 0.02)), "named list")
   expect_error(pass_from_max_errors(max_errors, list(AE = c(0.01, 0.02))), "single numeric threshold")
 })
+
+
+# Bound validation and p_min / p_max plumbing ---------------------------------------------------------------------
+
+test_that("simulate_success_at_n rejects bad bounds before simulating anything", {
+  for (case in bound_error_cases) {
+    cfg <- utils::modifyList(dm_config, list(K = 10L, proportion_method = case$method))
+    cfg["p_min"] <- list(case$p_min)
+    cfg["p_max"] <- list(case$p_max)
+    expect_error(simulate_success_at_n(alpha = 2, n = 10L, config = cfg, seed = 1), case$regex)
+  }
+})
+
+test_that("simulate_success_at_n runs with fixed_min_beta / fixed_max_beta for both models and attains the bound", {
+  bound_configs <- list(
+    fixed_min_beta = list(p_min = 0.01),
+    fixed_max_beta = list(p_max = 0.4)
+  )
+  for (model in c("dirichlet_multinomial", "multinomial")) {
+    base <- if (identical(model, "multinomial")) multinomial_config else dm_config
+    for (method in names(bound_configs)) {
+      cfg <- utils::modifyList(base, c(list(K = 10L, B = 3L, concentration = 50, proportion_method = method),
+                                       bound_configs[[method]]))
+      res <- simulate_success_at_n(alpha = 2, n = 100L, config = cfg, seed = 11)
+
+      expect_type(res$success, "logical")
+      expect_length(res$success, 3L)
+      expect_identical(res$success_count, sum(res$success))
+      expect_equal(res$success_rate, mean(res$success))
+
+      p <- res$rep_out$inputs$p
+      expect_identical(p, generate_proportions(
+        alpha = 2, K = 10L, method = method, p_min = cfg$p_min, p_max = cfg$p_max
+      ))
+      if (identical(method, "fixed_min_beta")) {
+        expect_identical(min(p), 0.01)
+      } else {
+        expect_identical(max(p), 0.4)
+      }
+    }
+  }
+})

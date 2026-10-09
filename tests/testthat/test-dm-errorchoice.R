@@ -56,3 +56,15 @@ test_that("run_simulation_dm_errorchoice still works for plain beta with NULL bo
   expect_true(all(c("p_table", "stats", "curves_tau", "curves_n") %in% names(res)))
   expect_length(list.files(dir), 1L)
 })
+
+test_that("run_dm_errorchoice_experiment rejects bad bounds before simulating", {
+  for (case in bound_error_cases) {
+    expect_error(
+      run_dm_errorchoice_experiment(
+        alpha = 2, K = 10L, B = 5L, metrics = "AE", proportion_method = case$method, p_min = case$p_min,
+        p_max = case$p_max, n_people = 2L, n_per_person = 100L, concentration = 1e4, seed = 1L
+      ),
+      case$regex
+    )
+  }
+})

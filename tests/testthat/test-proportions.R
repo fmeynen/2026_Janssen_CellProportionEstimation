@@ -200,3 +200,22 @@ test_that("the fixed generators reject a grid whose length is not K", {
 test_that("validate_proportions rejects zero proportions", {
   expect_error(validate_proportions(c(0.5, 0.5, 0.0)))
 })
+
+test_that("the dispatcher errors on a bound the method does not use, for every method and unused bound", {
+  expect_error(generate_proportions(alpha = 2, K = 10, method = "beta", p_min = 0.01), "p_min is not used by method = 'beta'")
+  expect_error(generate_proportions(alpha = 2, K = 10, method = "beta", p_max = 0.4), "p_max is not used by method = 'beta'")
+  expect_error(
+    generate_proportions(alpha = 2, K = 10, method = "fixed_max_beta", p_max = 0.4, p_min = 0.01),
+    "p_min is not used by method = 'fixed_max_beta'; leave it NULL."
+  )
+  expect_error(
+    generate_proportions(alpha = 2, K = 10, method = "fixed_min_beta", p_min = 0.01, p_max = 0.4),
+    "p_max is not used by method = 'fixed_min_beta'; leave it NULL."
+  )
+})
+
+test_that("the dispatcher still accepts the bound each method uses", {
+  expect_length(generate_proportions(alpha = 2, K = 10, method = "beta"), 10L)
+  expect_identical(max(generate_proportions(alpha = 2, K = 10, method = "fixed_max_beta", p_max = 0.4)), 0.4)
+  expect_identical(min(generate_proportions(alpha = 2, K = 10, method = "fixed_min_beta", p_min = 0.01)), 0.01)
+})

@@ -90,7 +90,9 @@ cached_result <- function(key, name, compute, cache = TRUE, force_recompute = FA
 #'   centre), plus every field required by `estimate_sample_size()` (`success_rate_target`, `rel_tol`,
 #'   `max_iterations`, `B`, `f0`, `f_floor`, `seed`) and by `simulate` (by default `simulate_success_at_n()`, which
 #'   also needs `K`, `taus`, `metrics`, `model`, `tie_method`, `proportion_method`, and — for
-#'   `model == "dirichlet_multinomial"` — `n_people` and `concentration`).
+#'   `model == "dirichlet_multinomial"` — `n_people` and `concentration`). `proportion_method` may be
+#'   `"fixed_min_beta"` (needs a single `config$p_min`) or `"fixed_max_beta"` (needs a single `config$p_max`); the
+#'   bounds are validated up front by `validate_proportion_bounds()` and both are part of the per-alpha cache key.
 #' @param cache           Logical; read/write per-alpha `.rds` cache files under `cache_dir`.
 #' @param force_recompute Logical; ignore any existing cache file and recompute (still writes the new result when
 #'   `cache` is `TRUE`).
@@ -112,6 +114,7 @@ run_sample_size_experiment <- function(
   cache_dir = here::here("results", "simresults"),
   simulate = simulate_success_at_n
 ) {
+  validate_proportion_bounds(config$proportion_method, config$K, config$p_min, config$p_max)
   alphas <- validate_positive_numeric(
     config$alpha,
     "config$alpha",
@@ -146,6 +149,7 @@ run_sample_size_experiment <- function(
       model = config$model,
       tie_method = config$tie_method,
       proportion_method = config$proportion_method,
+      p_min = config$p_min,
       p_max = config$p_max,
       n_people = config$n_people,
       concentration = config$concentration,
@@ -194,7 +198,7 @@ run_sample_size_experiment <- function(
 #'   `p` (list of proportion vectors, one per grid row; NULL for skipped rows) and `feasible` (logical vector).
 feasible_scenarios <- function(alpha, K, proportion_method, p_max) {
   if (identical(proportion_method, "fixed_max_beta")) {
-    validate_p_max(p_max)
+    validate_p_bound(p_max, "p_max")
     p_max_values <- as.numeric(p_max)
   } else {
     p_max_values <- NA_real_
@@ -397,7 +401,8 @@ run_dirichlet_multinomial_experiment <- function(
 #' @param proportion_method Proportion-generation method forwarded to `generate_proportions()` (default
 #'   `"beta"`).
 #' @param p_min,p_max Optional bounds forwarded to `generate_proportions()` (`p_min` for `"fixed_min_beta"`,
-#'   `p_max` for `"fixed_max_beta"`); `NULL` (default) when the method does not need them.
+#'   `p_max` for `"fixed_max_beta"`); single values, validated by
+#'   `validate_proportion_bounds()`. `NULL` (default) when the method does not use them (an unused bound is an error).
 #' @param n_people Positive integer vector; number(s) of people per replicate.
 #' @param n_per_person Positive integer vector; number(s) of cells sampled per person.
 #' @param concentration Positive numeric scalar; Dirichlet concentration parameter (shared by every scenario).
@@ -431,6 +436,7 @@ run_dm_errorchoice_experiment <- function(
   n_people <- validate_positive_integer(n_people, "n_people", allow_vector = TRUE)
   n_per_person <- validate_positive_integer(n_per_person, "n_per_person", allow_vector = TRUE)
   concentration <- validate_positive_numeric(concentration, "concentration")
+  validate_proportion_bounds(proportion_method, K, p_min, p_max)
 
   # p is a deterministic function of alpha (and K, proportion_method, p_min, p_max), so it is computed once per alpha and
   # reused across every n_people / n_per_person scenario for that alpha.

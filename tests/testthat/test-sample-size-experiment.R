@@ -188,3 +188,60 @@ test_that("runs end-to-end with the real simulator and returns positive integer 
   expect_type(res$sample_size$sample_size, "integer")
   message(sprintf("real-simulator integration test elapsed: %.2fs", elapsed))
 })
+
+
+# Bound validation and cache key ---------------------------------------------------------------------------------
+
+make_failing_sim <- function() {
+  function(alpha, n, config, seed) stop("should not be called")
+}
+
+test_that("run_sample_size_experiment rejects bad bounds before any simulation or cache write", {
+  for (case in bound_error_cases) {
+    cache_dir <- withr::local_tempdir()
+    cfg <- make_experiment_config(K = 10L, proportion_method = case$method)
+    cfg["p_min"] <- list(case$p_min)
+    cfg["p_max"] <- list(case$p_max)
+    expect_error(
+      run_sample_size_experiment(cfg, cache_dir = cache_dir, simulate = make_failing_sim()),
+      case$regex
+    )
+    expect_length(list.files(cache_dir), 0L)
+  }
+})
+
+test_that("p_min and p_max each change the sample-size cache key", {
+  cache_dir <- withr::local_tempdir()
+  fake <- make_counting_sim()
+  run <- function(...) {
+    cfg <- make_experiment_config(alpha = 2, K = 10L, ...)
+    run_sample_size_experiment(cfg, cache_dir = cache_dir, simulate = fake$sim)
+  }
+
+  run(proportion_method = "fixed_min_beta", p_min = 0.01)
+  expect_length(list.files(cache_dir), 1L)
+  calls_before <- fake$calls()
+  run(proportion_method = "fixed_min_beta", p_min = 0.02)
+  expect_length(list.files(cache_dir), 2L)
+  expect_gt(fake$calls(), calls_before)
+
+  run(proportion_method = "fixed_max_beta", p_max = 0.3)
+  run(proportion_method = "fixed_max_beta", p_max = 0.4)
+  expect_length(list.files(cache_dir), 4L)
+
+  calls_before <- fake$calls()
+  run(proportion_method = "fixed_min_beta", p_min = 0.01)
+  expect_identical(fake$calls(), calls_before)
+  expect_length(list.files(cache_dir), 4L)
+})
+
+test_that("run_sample_size_experiment runs with the real simulator for fixed_min_beta", {
+  cache_dir <- withr::local_tempdir()
+  cfg <- make_experiment_config(
+    alpha = 2, K = 10L, B = 5L, taus = list(AE = 0.3), metrics = "AE", model = "dirichlet_multinomial",
+    n_people = 2L, concentration = 50, tie_method = "random", proportion_method = "fixed_min_beta", p_min = 0.01,
+    n_init = 50, max_iterations = 2L, rel_tol = 0.5
+  )
+  res <- suppressWarnings(run_sample_size_experiment(cfg, cache_dir = cache_dir))
+  expect_identical(nrow(res$sample_size), 1L)
+})
